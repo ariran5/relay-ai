@@ -34,7 +34,8 @@ var package_default = {
   bin: {
     "relay-ai": "dist/cli.js",
     relayai: "dist/cli.js",
-    relai: "dist/cli.js"
+    relai: "dist/cli.js",
+    relay: "dist/cli.js"
   },
   files: [
     "dist",
@@ -80,6 +81,7 @@ var package_default = {
     "gitlab-ai-provider": "^6.15.0",
     graphql: "^16.14.2",
     "ipaddr.js": "^2.4.0",
+    "jsonc-parser": "^3.3.1",
     "node-forge": "^1.4.0",
     open: "^11.0.0",
     picocolors: "^1.1.1",
@@ -7480,4 +7482,4 @@ export {
   streamAnthropicResponse,
   generateAnthropicResponse
 };
-//# sourceMappingURL=chunk-ZLLXP35M.js.map
+//# sourceMappingURL=chunk-KXSYWQOJ.js.map

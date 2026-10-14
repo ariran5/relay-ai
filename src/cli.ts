@@ -420,6 +420,14 @@ export function parseArgs(args: string[]): ParsedArgs {
         parsed.claudeArgs.push(...rest.slice(i + 1));
         break;
       }
+      if (first === 'antigravity-ide' && arg === '--use-existing-profile') {
+        parsed.useExistingProfile = true;
+        continue;
+      }
+      if (first === 'antigravity-ide' && arg === '--restore') {
+        parsed.restore = true;
+        continue;
+      }
       if (arg === '--trace') {
         parsed.trace = true;
         continue;
@@ -439,6 +447,17 @@ export function parseArgs(args: string[]): ParsedArgs {
         continue;
       }
       parsed.claudeArgs.push(arg);
+    }
+    if (parsed.useExistingProfile) {
+      const conflicting = parsed.claudeArgs.find(a =>
+        a === '--user-data-dir' || a.startsWith('--user-data-dir=') ||
+        a === '--extensions-dir' || a.startsWith('--extensions-dir=') ||
+        a === '--profile' || a.startsWith('--profile=')
+      );
+      if (conflicting) {
+        parsed.error = '--use-existing-profile cannot be combined with ' + conflicting.split('=')[0];
+        return parsed;
+      }
     }
     return parsed;
   }
@@ -532,8 +551,8 @@ ${pc.bold('Commands:')}
   claude-app  Launch Claude Desktop app with registry providers (macOS + Windows + Linux)
 
 ${pc.bold('Binary aliases:')}
+  relay       Same CLI as relay-ai (shortest)
   relayai     Same CLI as relay-ai (shorter to type)
-  relai       Same CLI as relay-ai (shortest)
 
 ${pc.bold('Favorites:')}
   agy, antigravity, and antigravity-ide list the selected launch model at every
@@ -753,6 +772,8 @@ ${pc.bold('Usage:')}
 ${pc.bold('Relay options:')}
   --provider <id>    Use a specific provider (skip picker)
   --model <id>       Use a specific model (skip picker)
+  --use-existing-profile Use existing profile instead of isolated Relay profile
+  --restore          Restore normal configuration if previous session crashed
   --trace            Write debug log to ~/.relay-ai/logs/antigravity-ide-debug.log
   -h, --help         Show this help
   -v, --version      Show version
@@ -760,7 +781,8 @@ ${pc.bold('Relay options:')}
 ${pc.bold('How it works:')}
   Creates an isolated Relay-managed IDE profile, starts a local Cloud Code
   gateway, and injects Relay AI models into Antigravity's native picker.
-  The normal IDE profile is never modified.
+  By default, the normal IDE profile is never modified. With --use-existing-profile,
+  Relay temporarily applies its catalog to your normal profile and restores on exit.
 
 ${pc.bold('Platform:')}
   macOS (Apple Silicon) — other platforms coming after testing.
@@ -1850,6 +1872,8 @@ Options:
     return runAntigravityIdeCommand(parsed.claudeArgs, parsed.trace, {
       launchProvider: parsed.launchProvider,
       launchModel: parsed.launchModel,
+      useExistingProfile: parsed.useExistingProfile,
+      restore: parsed.restore,
     });
   }
 

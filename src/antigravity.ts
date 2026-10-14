@@ -13,6 +13,17 @@ import { evaluateAgySwitchCompatibility } from './antigravity/slot-registry.js';
 import { resolveAntigravityLaunchRoutes } from './antigravity/launch-routes.js';
 import { launchAntigravityCli, readAntigravityCliVersion } from './antigravity/launch-cli.js';
 import { clearAppLastSelectedModel } from './antigravity/ide-profile.js';
+import { stopExistingIde, watchExistingIdeShutdown, waitForExistingIdeShutdownWithConfirm } from './antigravity/ide-existing-lifecycle.js';
+import {
+  beginExistingIdeSession,
+  restoreExistingIdeSession,
+  readExistingIdeRecoveryRecord,
+  assertNoActiveExistingIdeSession,
+  acquireExistingIdeSession,
+  releaseEmptyExistingIdeSession,
+  readExistingIdeLock,
+} from './antigravity/ide-session.js';
+import { isProcessAlive } from './codex/session.js';
 import catalogFixtureRaw from './antigravity/fixtures/fetchAvailableModels.json' with { type: 'json' };
 import {
   forceQuitAntigravityApp,
@@ -25,6 +36,11 @@ import {
   quitAntigravityIdeGracefully,
   waitForAntigravityAppQuit,
   waitForAntigravityIdeQuit,
+  getDefaultAntigravityIdeProfileDir,
+  isExistingAntigravityIdeRunning,
+  quitExistingAntigravityIde,
+  waitForExistingAntigravityIdeQuit,
+  forceQuitExistingAntigravityIde,
 } from './antigravity/launch-ide.js';
 import { pickLocalModel } from './prompts.js';
 import { pickerRefresh } from './picker-refresh.js';
@@ -551,14 +567,103 @@ export async function runAntigravityAppCommand(
   );
 }
 
+function existingIdeControl(profileDir: string) {
+  return {
+    isRunning: () => isExistingAntigravityIdeRunning(profileDir),
+    quit: () => quitExistingAntigravityIde(profileDir),
+    waitForQuit: () => waitForExistingAntigravityIdeQuit(profileDir),
+    forceQuit: () => forceQuitExistingAntigravityIde(profileDir),
+  };
+}
+
+function restoreExistingProfile(): void {
+  const result = restoreExistingIdeSession(process.env, { allowOwnPid: true });
+  if (!result.restored) throw new Error(result.message ?? 'Could not restore the Antigravity IDE profile. Run relay-ai antigravity-ide --restore.');
+  for (const warning of result.warnings ?? []) p.log.warn(warning);
+  p.log.success('Restored your Antigravity IDE configuration. The IDE is closed.');
+}
+
 export async function runAntigravityIdeCommand(
   childArgs: string[],
   trace = false,
-  boot?: { launchProvider?: string; launchModel?: string },
+  boot?: { launchProvider?: string; launchModel?: string; useExistingProfile?: boolean; restore?: boolean },
 ): Promise<number> {
-  return runAntigravityCommand(
+  let existingProfileDir: string | undefined;
+  try {
+    const lock = readExistingIdeLock();
+    const separateActiveSession = lock && lock.pid !== process.pid && isProcessAlive(lock.pid);
+    if (boot?.useExistingProfile || boot?.restore || !separateActiveSession) assertNoActiveExistingIdeSession();
+    const pending = separateActiveSession ? null : readExistingIdeRecoveryRecord();
+    if (pending) {
+      acquireExistingIdeSession(pending.profileDir, process.env, { recovery: true });
+      const latest = readExistingIdeRecoveryRecord();
+      if (latest) {
+        p.log.step('Recovering the previous Antigravity IDE profile...');
+        await stopExistingIde(existingIdeControl(latest.profileDir));
+        restoreExistingProfile();
+      } else {
+        releaseEmptyExistingIdeSession();
+      }
+    } else if (boot?.restore) {
+      if (lock) acquireExistingIdeSession(lock.profileDir);
+      releaseEmptyExistingIdeSession();
+      p.log.info('Nothing to restore.');
+    }
+    if (boot?.restore) return 0;
+    if (boot?.useExistingProfile) {
+      existingProfileDir = getDefaultAntigravityIdeProfileDir();
+      acquireExistingIdeSession(existingProfileDir);
+    }
+  } catch (error) {
+    p.log.error(String(error));
+    return 1;
+  }
+  try {
+    return await runAntigravityCommand(
     'relay-ai antigravity-ide — Antigravity IDE', 'ide', trace, boot,
     async (env, _routes, gatewayHandle) => {
+      if (boot?.useExistingProfile) {
+        const profileDir = existingProfileDir!;
+        const control = existingIdeControl(profileDir);
+        acquireExistingIdeSession(profileDir);
+        const shutdown = watchExistingIdeShutdown(control.isRunning);
+        let started = false;
+        try {
+          p.log.warn('Using your existing Antigravity IDE profile and its signed-in Google account.');
+          p.log.info('Relay will close the IDE, temporarily apply its model catalog, and restore the profile on exit.');
+          await stopExistingIde(control);
+          if (shutdown.interrupted) return 0;
+          beginExistingIdeSession(profileDir, gatewayHandle.url);
+          started = true;
+          if (shutdown.interrupted) return 0;
+          const launchCode = await launchAntigravityIde(env, profileDir, gatewayHandle.url, childArgs, { existingProfile: true });
+          if (launchCode !== 0) return launchCode;
+          shutdown.launched();
+          p.log.info('Antigravity IDE is using Relay models. Close the IDE when you are done, or press Ctrl+C to restore your normal configuration.');
+          await waitForExistingIdeShutdownWithConfirm(shutdown, async () => {
+            const choice = await p.select({
+              message: 'Close Antigravity IDE and restore your normal configuration?',
+              options: [
+                { value: 'yes', label: 'Yes, close Antigravity IDE and restore config' },
+                { value: 'no', label: 'No, keep session running' },
+              ],
+            });
+            return p.isCancel(choice) || choice === 'yes';
+          });
+          return 0;
+        } finally {
+          try {
+            if (started || readExistingIdeRecoveryRecord()?.pid === process.pid) {
+              await stopExistingIde(control);
+              restoreExistingProfile();
+            } else {
+              releaseEmptyExistingIdeSession();
+            }
+          } finally {
+            shutdown.dispose();
+          }
+        }
+      }
       const profileDir = join(homedir(), '.relay-ai', 'antigravity', 'profile');
       if (isAntigravityIdeRunning(profileDir)) {
         const restart = await p.confirm({
@@ -601,4 +706,7 @@ export async function runAntigravityIdeCommand(
     },
     { childArgs, versionGuard: false, pauseForCapacityWarning: false },
   );
+  } finally {
+    if (existingProfileDir && !readExistingIdeRecoveryRecord()) releaseEmptyExistingIdeSession();
+  }
 }

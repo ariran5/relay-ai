@@ -2,7 +2,7 @@
 import {
   addManualModel,
   removeManualModel
-} from "./chunk-CMWX2S4I.js";
+} from "./chunk-CRVHJY4H.js";
 import {
   CODEX_APP_AUTO_COMPACT_RATIO,
   CODEX_APP_PROVIDER_ID,
@@ -130,7 +130,7 @@ import {
   upstreamModelId,
   waitForCodexAppQuit,
   zenRegistryStub
-} from "./chunk-IGON3W5X.js";
+} from "./chunk-IKGQWXB3.js";
 import {
   filterTemplates,
   getTemplateById,
@@ -228,7 +228,7 @@ import {
   upstreamHttpStatus,
   validateCustomEndpointUrl,
   writeSecureLogLine
-} from "./chunk-ZLLXP35M.js";
+} from "./chunk-KXSYWQOJ.js";
 import "./chunk-JIDIH7DS.js";
 
 // src/cli.ts
@@ -10884,13 +10884,506 @@ function prepareIdeProfile(profileDir, gatewayUrl) {
   return profileDir;
 }
 
+// src/antigravity/ide-existing-lifecycle.ts
+async function stopExistingIde(control) {
+  if (!control.isRunning()) return;
+  control.quit();
+  if (await control.waitForQuit()) return;
+  control.forceQuit();
+  if (await control.waitForQuit()) return;
+  throw new Error("Antigravity IDE is still running. Close it, then run relay-ai antigravity-ide --restore. Recovery files were retained.");
+}
+function watchExistingIdeShutdown(isRunning) {
+  let resolve2;
+  let reject2;
+  let interrupted = false;
+  let askBeforeClose = false;
+  let launched = false;
+  let promise;
+  const arm = () => {
+    promise = new Promise((done, fail) => {
+      resolve2 = done;
+      reject2 = fail;
+    });
+  };
+  arm();
+  const onSignal = (signal = "ctrl-c") => {
+    interrupted = true;
+    askBeforeClose = signal === "SIGINT" || signal === "ctrl-c";
+    resolve2();
+  };
+  const input = process.stdin;
+  const captureCtrlC = process.platform === "win32" && input.isTTY;
+  const wasRaw = input.isRaw;
+  const wasPaused = input.isPaused();
+  const onInput = (chunk) => {
+    if (typeof chunk === "string" ? chunk.includes("") : chunk.includes(3)) onSignal();
+  };
+  if (captureCtrlC) {
+    input.on("data", onInput);
+    input.setRawMode(true);
+    input.resume();
+  }
+  const signalHandlers = [];
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+    const handler = () => onSignal(signal);
+    signalHandlers.push({ signal, handler });
+    process.on(signal, handler);
+  }
+  const timer = setInterval(() => {
+    try {
+      if (launched && !isRunning()) resolve2();
+    } catch (error) {
+      reject2(error);
+    }
+  }, 1e3);
+  return {
+    get promise() {
+      return promise;
+    },
+    get interrupted() {
+      return interrupted;
+    },
+    get askBeforeClose() {
+      return askBeforeClose;
+    },
+    launched() {
+      launched = true;
+    },
+    rearm() {
+      interrupted = false;
+      askBeforeClose = false;
+      arm();
+    },
+    dispose() {
+      clearInterval(timer);
+      if (captureCtrlC) {
+        input.removeListener("data", onInput);
+        input.setRawMode(wasRaw);
+        if (wasPaused) input.pause();
+      }
+      for (const { signal, handler } of signalHandlers) process.removeListener(signal, handler);
+    }
+  };
+}
+async function waitForExistingIdeShutdownWithConfirm(watcher, confirmClose) {
+  for (; ; ) {
+    await watcher.promise;
+    if (!watcher.interrupted || !watcher.askBeforeClose) return;
+    console.log("");
+    if (await confirmClose()) return;
+    watcher.rearm();
+  }
+}
+
+// src/antigravity/ide-session.ts
+import {
+  closeSync,
+  linkSync,
+  existsSync as existsSync8,
+  mkdirSync as mkdirSync4,
+  openSync,
+  readFileSync as readFileSync4,
+  rmSync as rmSync3,
+  unlinkSync as unlinkSync2,
+  writeFileSync as writeFileSync4
+} from "fs";
+import { createRequire as createRequire2 } from "module";
+import { dirname as dirname2, join as join11 } from "path";
+import { createHash as createHash4, randomUUID as randomUUID3 } from "crypto";
+import { parse, modify, applyEdits } from "jsonc-parser";
+var require3 = createRequire2(import.meta.url);
+var MODEL_PREFERENCES_KEY2 = "antigravityUnifiedStateSync.modelPreferences";
+var JETSKI_CLOUD_CODE_URL_KEY = "jetski.cloudCodeUrl";
+function getAntigravityHome(env = process.env) {
+  return join11(getAppHome(env), "antigravity");
+}
+function getExistingIdeLockPath(env = process.env) {
+  return join11(getAntigravityHome(env), "existing-ide-session.json");
+}
+function getExistingIdeRecoveryRecordPath(env = process.env) {
+  return join11(getAntigravityHome(env), "existing-ide-recovery.json");
+}
+function fileSha256(filePath) {
+  return createHash4("sha256").update(readFileSync4(filePath)).digest("hex");
+}
+function readExistingIdeLock(env = process.env) {
+  const lockPath = getExistingIdeLockPath(env);
+  if (!existsSync8(lockPath)) return null;
+  const rawText = readFileSync4(lockPath, "utf8");
+  if (rawText.trim().length === 0) {
+    throw new Error(`Lock file at ${lockPath} is currently empty or in the process of being created.`);
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (err) {
+    throw new Error(`Malformed Antigravity IDE session lock at ${lockPath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const lock = parsed;
+  if (!lock || typeof lock.pid !== "number" || typeof lock.profileDir !== "string") {
+    throw new Error(`Malformed Antigravity IDE session lock at ${lockPath}: missing required fields (pid, profileDir)`);
+  }
+  return lock;
+}
+function clearExistingIdeLock(env = process.env) {
+  const p16 = getExistingIdeLockPath(env);
+  if (existsSync8(p16)) rmSync3(p16, { force: true });
+}
+function readExistingIdeRecoveryRecord(env = process.env) {
+  const recordPath = getExistingIdeRecoveryRecordPath(env);
+  if (!existsSync8(recordPath)) return null;
+  const rawText = readFileSync4(recordPath, "utf8");
+  let parsed;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch (err) {
+    throw new Error(`Malformed Antigravity IDE recovery record at ${recordPath}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const record = parsed;
+  if (!record || typeof record.pid !== "number" || typeof record.profileDir !== "string") {
+    throw new Error(`Malformed Antigravity IDE recovery record at ${recordPath}: missing required fields (pid, profileDir)`);
+  }
+  return record;
+}
+function writeExistingIdeRecoveryRecord(record, env = process.env) {
+  atomicWriteFile(getExistingIdeRecoveryRecordPath(env), `${JSON.stringify(record, null, 2)}
+`);
+}
+function clearExistingIdeRecoveryRecord(env = process.env) {
+  const p16 = getExistingIdeRecoveryRecordPath(env);
+  if (existsSync8(p16)) rmSync3(p16, { force: true });
+}
+function assertNoActiveExistingIdeSession(env = process.env) {
+  const lock = readExistingIdeLock(env);
+  if (lock && lock.pid !== process.pid && isProcessAlive(lock.pid)) {
+    throw new Error(`Another relay-ai antigravity-ide session is running (pid ${lock.pid}). Close it first.`);
+  }
+}
+function acquireExistingIdeSession(profileDir, env = process.env, options = {}) {
+  const lockPath = getExistingIdeLockPath(env);
+  mkdirSync4(dirname2(lockPath), { recursive: true, mode: 448 });
+  const lock = { pid: process.pid, profileDir, startedAt: (/* @__PURE__ */ new Date()).toISOString() };
+  const tempPath = `${lockPath}.${process.pid}.${randomUUID3()}.tmp`;
+  writeFileSync4(tempPath, JSON.stringify(lock), { mode: 384, flag: "wx" });
+  const publish = () => linkSync(tempPath, lockPath);
+  try {
+    try {
+      publish();
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      const guardPath = `${lockPath}.reclaim`;
+      let guard;
+      try {
+        guard = openSync(guardPath, "wx", 384);
+      } catch (error2) {
+        throw new Error(`Cannot acquire the recovery guard at ${guardPath}. Another recovery may be running. If that process has exited, remove this guard file and retry --restore.`, { cause: error2 });
+      }
+      try {
+        const existing = readExistingIdeLock(env);
+        if (existing?.pid === process.pid) {
+          if (existing.profileDir !== profileDir) throw new Error("This Relay process already owns another IDE profile.");
+        } else {
+          if (existing && isProcessAlive(existing.pid)) throw new Error(`Another relay-ai antigravity-ide session is running (pid ${existing.pid}). Close it first.`);
+          if (readExistingIdeRecoveryRecord(env) && !options.recovery) throw new Error("An interrupted IDE session needs recovery. Run relay-ai antigravity-ide --restore.");
+          if (existing) unlinkSync2(lockPath);
+          publish();
+        }
+      } finally {
+        closeSync(guard);
+        rmSync3(guardPath, { force: true });
+      }
+    }
+  } finally {
+    rmSync3(tempPath, { force: true });
+  }
+  return { lock, release: () => releaseEmptyExistingIdeSession(env) };
+}
+function releaseEmptyExistingIdeSession(env = process.env) {
+  if (existsSync8(getExistingIdeRecoveryRecordPath(env))) return;
+  try {
+    const lock = readExistingIdeLock(env);
+    if (lock && lock.pid === process.pid) {
+      clearExistingIdeLock(env);
+    }
+  } catch {
+  }
+}
+function checkNodeSqliteAvailable() {
+  const originalEmitWarning = process.emitWarning;
+  try {
+    process.emitWarning = ((warning, ...rest) => {
+      const text6 = typeof warning === "string" ? warning : warning.message;
+      if (text6.includes("SQLite")) return;
+      originalEmitWarning.call(process, warning, ...rest);
+    });
+    const sqlite = require3("node:sqlite");
+    if (!sqlite || typeof sqlite.DatabaseSync !== "function") {
+      throw new Error("node:sqlite is unavailable or does not export DatabaseSync");
+    }
+  } catch (err) {
+    throw new Error(`Node.js SQLite support (node:sqlite) is required for --use-existing-profile, but is unavailable: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    process.emitWarning = originalEmitWarning;
+  }
+}
+function readSqliteModelPreferences(dbPath) {
+  if (!existsSync8(dbPath)) return void 0;
+  const originalEmitWarning = process.emitWarning;
+  try {
+    process.emitWarning = ((warning, ...rest) => {
+      const text6 = typeof warning === "string" ? warning : warning.message;
+      if (text6.includes("SQLite")) return;
+      originalEmitWarning.call(process, warning, ...rest);
+    });
+    const { DatabaseSync } = require3("node:sqlite");
+    const db = new DatabaseSync(dbPath);
+    try {
+      const row = db.prepare("SELECT value FROM ItemTable WHERE key = ?").get(MODEL_PREFERENCES_KEY2);
+      if (row === void 0) return { existed: false };
+      const val = row.value;
+      if (typeof val === "string") {
+        return { existed: true, valueType: "string", value: val };
+      }
+      if (val instanceof Uint8Array || Buffer.isBuffer(val)) {
+        return { existed: true, valueType: "blob", value: Buffer.from(val).toString("hex") };
+      }
+      if (typeof val === "number") {
+        return { existed: true, valueType: "number", value: String(val) };
+      }
+      if (val === null) {
+        return { existed: true, valueType: "null" };
+      }
+      return { existed: true, valueType: "string", value: String(val) };
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    throw new Error(`Failed to inspect state.vscdb: ${err instanceof Error ? err.message : String(err)}`);
+  } finally {
+    process.emitWarning = originalEmitWarning;
+  }
+}
+function clearSqliteModelPreferencesRow(dbPath) {
+  if (!existsSync8(dbPath)) return;
+  const originalEmitWarning = process.emitWarning;
+  try {
+    process.emitWarning = ((warning, ...rest) => {
+      const text6 = typeof warning === "string" ? warning : warning.message;
+      if (text6.includes("SQLite")) return;
+      originalEmitWarning.call(process, warning, ...rest);
+    });
+    const { DatabaseSync } = require3("node:sqlite");
+    const db = new DatabaseSync(dbPath);
+    try {
+      db.prepare("DELETE FROM ItemTable WHERE key = ?").run(MODEL_PREFERENCES_KEY2);
+    } finally {
+      db.close();
+    }
+  } finally {
+    process.emitWarning = originalEmitWarning;
+  }
+}
+function restoreSqliteModelPreferences(dbPath, saved) {
+  if (!existsSync8(dbPath)) return;
+  const originalEmitWarning = process.emitWarning;
+  try {
+    process.emitWarning = ((warning, ...rest) => {
+      const text6 = typeof warning === "string" ? warning : warning.message;
+      if (text6.includes("SQLite")) return;
+      originalEmitWarning.call(process, warning, ...rest);
+    });
+    const { DatabaseSync } = require3("node:sqlite");
+    const db = new DatabaseSync(dbPath);
+    try {
+      if (!saved.existed) {
+        db.prepare("DELETE FROM ItemTable WHERE key = ?").run(MODEL_PREFERENCES_KEY2);
+        return;
+      }
+      let insertVal = null;
+      if (saved.valueType === "blob" && saved.value !== void 0) {
+        insertVal = Buffer.from(saved.value, "hex");
+      } else if (saved.valueType === "number" && saved.value !== void 0) {
+        insertVal = Number(saved.value);
+      } else if (saved.valueType === "string" && saved.value !== void 0) {
+        insertVal = String(saved.value);
+      }
+      db.prepare("INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)").run(MODEL_PREFERENCES_KEY2, insertVal);
+    } finally {
+      db.close();
+    }
+  } finally {
+    process.emitWarning = originalEmitWarning;
+  }
+}
+function beginExistingIdeSession(profileDir, gatewayUrl, env = process.env) {
+  if (readExistingIdeRecoveryRecord(env)) throw new Error("An IDE session needs restoration before another overlay can be applied.");
+  checkNodeSqliteAvailable();
+  acquireExistingIdeSession(profileDir, env);
+  const userDir = join11(profileDir, "User");
+  mkdirSync4(userDir, { recursive: true });
+  const settingsPath = join11(userDir, "settings.json");
+  let originalSettingsSha256;
+  let backupSettingsPath;
+  let originalContent = "";
+  let hadSettingsFile = false;
+  let originalGatewayUrl = null;
+  let hadGatewayUrl = false;
+  if (existsSync8(settingsPath)) {
+    hadSettingsFile = true;
+    originalContent = readFileSync4(settingsPath, "utf8");
+    const errors = [];
+    const parsedObj = parse(originalContent, errors, { allowTrailingComma: true });
+    if (errors.length > 0 || originalContent.trim().length > 0 && (!parsedObj || typeof parsedObj !== "object" || Array.isArray(parsedObj))) {
+      throw new Error(`Cannot patch malformed settings.json at ${settingsPath}. Please fix JSON syntax errors.`);
+    }
+    if (parsedObj && typeof parsedObj === "object" && JETSKI_CLOUD_CODE_URL_KEY in parsedObj) {
+      hadGatewayUrl = true;
+      originalGatewayUrl = parsedObj[JETSKI_CLOUD_CODE_URL_KEY] ?? null;
+    }
+    originalSettingsSha256 = fileSha256(settingsPath);
+    const backupsDir = join11(getAntigravityHome(env), "backups");
+    mkdirSync4(backupsDir, { recursive: true });
+    backupSettingsPath = join11(backupsDir, `settings.${Date.now()}.bak`);
+    atomicWriteFile(backupSettingsPath, originalContent);
+  }
+  const dbPath = join11(userDir, "globalStorage", "state.vscdb");
+  let savedModelPref;
+  if (existsSync8(dbPath)) {
+    savedModelPref = readSqliteModelPreferences(dbPath);
+  }
+  const record = {
+    pid: process.pid,
+    profileDir,
+    startedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    gatewayUrl,
+    settingsPath,
+    backupSettingsPath,
+    originalSettingsSha256,
+    originalGatewayUrl,
+    hadGatewayUrl,
+    savedModelPreferencesRow: savedModelPref,
+    sqliteDbPath: existsSync8(dbPath) ? dbPath : void 0
+  };
+  writeExistingIdeRecoveryRecord(record, env);
+  if (existsSync8(dbPath) && savedModelPref?.existed) {
+    clearSqliteModelPreferencesRow(dbPath);
+  }
+  let newContent = "";
+  if (!hadSettingsFile || originalContent.trim().length === 0) {
+    newContent = JSON.stringify({ [JETSKI_CLOUD_CODE_URL_KEY]: gatewayUrl }, null, 2) + "\n";
+  } else {
+    const edits = modify(originalContent, [JETSKI_CLOUD_CODE_URL_KEY], gatewayUrl, {
+      formattingOptions: { insertSpaces: true, tabSize: 2 }
+    });
+    newContent = applyEdits(originalContent, edits);
+  }
+  atomicWriteFile(settingsPath, newContent);
+  record.patchedSettingsSha256 = fileSha256(settingsPath);
+  writeExistingIdeRecoveryRecord(record, env);
+  return record;
+}
+function restoreExistingIdeSession(env = process.env, options = {}) {
+  const warnings = [];
+  const allowOwn = options.allowOwnPid ?? false;
+  let lock = null;
+  try {
+    lock = readExistingIdeLock(env);
+  } catch (err) {
+    return {
+      restored: false,
+      message: err instanceof Error ? err.message : String(err)
+    };
+  }
+  if (lock && (!allowOwn || lock.pid !== process.pid) && isProcessAlive(lock.pid)) {
+    return {
+      restored: false,
+      liveSession: true,
+      message: `Another relay-ai antigravity-ide session is running (pid ${lock.pid}). Close it first, then run --restore.`
+    };
+  }
+  let record = null;
+  try {
+    record = readExistingIdeRecoveryRecord(env);
+  } catch (err) {
+    return {
+      restored: false,
+      message: err instanceof Error ? err.message : String(err)
+    };
+  }
+  if (!record && !lock) {
+    return { restored: false, message: "Nothing to restore." };
+  }
+  if (record) {
+    const { settingsPath, backupSettingsPath, originalSettingsSha256, patchedSettingsSha256, hadGatewayUrl, originalGatewayUrl, gatewayUrl } = record;
+    if (existsSync8(settingsPath)) {
+      const currentSha = fileSha256(settingsPath);
+      const backupValid = Boolean(
+        backupSettingsPath && existsSync8(backupSettingsPath) && originalSettingsSha256 && fileSha256(backupSettingsPath) === originalSettingsSha256
+      );
+      if (patchedSettingsSha256 && currentSha === patchedSettingsSha256 && backupValid) {
+        const backupContent = readFileSync4(backupSettingsPath, "utf8");
+        atomicWriteFile(settingsPath, backupContent);
+      } else if (!record.originalSettingsSha256 && currentSha === patchedSettingsSha256) {
+        rmSync3(settingsPath, { force: true });
+      } else {
+        try {
+          const currentContent = readFileSync4(settingsPath, "utf8");
+          const errors = [];
+          const parsed = parse(currentContent, errors, { allowTrailingComma: true });
+          if (errors.length > 0 || currentContent.trim().length > 0 && (!parsed || typeof parsed !== "object" || Array.isArray(parsed))) {
+            return {
+              restored: false,
+              message: `Cannot restore settings.json at ${settingsPath} because it contains syntax errors. Fix them, then run --restore. Recovery files were retained.`
+            };
+          }
+          if (parsed && typeof parsed === "object") {
+            const currentGw = parsed[JETSKI_CLOUD_CODE_URL_KEY];
+            if (!record.originalSettingsSha256 && Object.keys(parsed).length === 1 && currentGw === gatewayUrl) {
+              rmSync3(settingsPath, { force: true });
+            } else if (currentGw !== void 0 && currentGw !== gatewayUrl) {
+              warnings.push(`jetski.cloudCodeUrl was modified to "${currentGw}" during the session; preserved user change.`);
+            } else if (currentGw !== void 0) {
+              const edits = hadGatewayUrl ? modify(currentContent, [JETSKI_CLOUD_CODE_URL_KEY], originalGatewayUrl, { formattingOptions: { insertSpaces: true, tabSize: 2 } }) : modify(currentContent, [JETSKI_CLOUD_CODE_URL_KEY], void 0, {});
+              const restoredContent = applyEdits(currentContent, edits);
+              atomicWriteFile(settingsPath, restoredContent);
+            }
+          }
+        } catch (err) {
+          return {
+            restored: false,
+            message: `Failed to revert settings.json: ${err instanceof Error ? err.message : String(err)}. Recovery files were retained.`
+          };
+        }
+      }
+    }
+    if (record.sqliteDbPath && record.savedModelPreferencesRow && existsSync8(record.sqliteDbPath)) {
+      try {
+        restoreSqliteModelPreferences(record.sqliteDbPath, record.savedModelPreferencesRow);
+      } catch (err) {
+        return {
+          restored: false,
+          message: `Failed to restore SQLite modelPreferences: ${err instanceof Error ? err.message : String(err)}. Recovery files were retained.`
+        };
+      }
+    }
+  }
+  clearExistingIdeRecoveryRecord(env);
+  clearExistingIdeLock(env);
+  return {
+    restored: true,
+    message: "Restored Antigravity IDE configuration.",
+    warnings: warnings.length > 0 ? warnings : void 0
+  };
+}
+
 // src/antigravity/launch-ide.ts
 import { execFileSync as execFileSync2, execSync as execSync5, spawn as spawn6 } from "child_process";
-import { existsSync as existsSync8 } from "fs";
+import { existsSync as existsSync9, readFileSync as readFileSync5 } from "fs";
 import { homedir as homedir9 } from "os";
-import { join as join11 } from "path";
-var LINUX_APP_PROFILE_DIR = join11(homedir9(), ".relay-ai", "antigravity", "app-profile");
-var LINUX_IDE_PROFILE_DIR = join11(homedir9(), ".relay-ai", "antigravity", "profile");
+import { dirname as dirname3, join as join12, normalize } from "path";
+var LINUX_APP_PROFILE_DIR = join12(homedir9(), ".relay-ai", "antigravity", "app-profile");
+var LINUX_IDE_PROFILE_DIR = join12(homedir9(), ".relay-ai", "antigravity", "profile");
 function sleep(ms) {
   return new Promise((resolve2) => setTimeout(resolve2, ms));
 }
@@ -10898,10 +11391,10 @@ function linuxAntigravityBinary() {
   const candidates = [
     "/usr/share/antigravity/antigravity",
     "/opt/antigravity/antigravity",
-    join11(homedir9(), ".local", "share", "antigravity", "antigravity")
+    join12(homedir9(), ".local", "share", "antigravity", "antigravity")
   ];
   for (const candidate of candidates) {
-    if (existsSync8(candidate)) return candidate;
+    if (existsSync9(candidate)) return candidate;
   }
   return null;
 }
@@ -10964,6 +11457,17 @@ function defaultProcessList() {
   } catch {
     return "";
   }
+}
+function strictProcessList() {
+  const psArgs = process.platform === "linux" ? ["-eo", "pid=,args="] : ["-axo", "pid=,command="];
+  if (process.platform !== "darwin" && process.platform !== "linux") {
+    throw new Error(`Process listing not supported on platform: ${process.platform}`);
+  }
+  return execFileSync2("ps", psArgs, {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 1024 * 1024 * 8
+  });
 }
 function isAntigravityIdeRunning(profileDir, processList = defaultProcessList) {
   if (process.platform === "win32") return winIsProcessRunningForProfile("Antigravity IDE.exe", profileDir);
@@ -11049,36 +11553,151 @@ function quitAntigravityAppGracefully() {
     });
   }
 }
+function getDefaultAntigravityIdeProfileDir() {
+  const binary = findAntigravityIdeBinary();
+  if (!binary) throw new Error("Antigravity IDE not found.");
+  const appDir = process.platform === "darwin" ? join12(binary.slice(0, binary.indexOf(".app/") + 4), "Contents", "Resources", "app") : join12(dirname3(binary), "resources", "app");
+  const product = JSON.parse(readFileSync5(join12(appDir, "product.json"), "utf8"));
+  const name = product.nameShort;
+  if (!name || /[\\/]/.test(name) || name === "." || name === "..") {
+    throw new Error("Cannot identify the installed Antigravity IDE profile.");
+  }
+  const base = process.platform === "darwin" ? join12(homedir9(), "Library", "Application Support") : process.platform === "win32" ? process.env["APPDATA"] ?? join12(homedir9(), "AppData", "Roaming") : process.env["XDG_CONFIG_HOME"] ?? join12(homedir9(), ".config");
+  const profile = join12(base, name);
+  if (!existsSync9(join12(profile, "User"))) {
+    throw new Error("The normal Antigravity IDE profile was not found. Open the IDE normally first.");
+  }
+  return profile;
+}
+function commandMatchesProfile(command, profile) {
+  const escaped = normalize(profile).replace(/[\\/]$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `(?:^|\\s)--user-data-dir(?:=|\\s+)(?:"${escaped}"|'${escaped}'|${escaped})(?=\\s|$)`,
+    process.platform === "win32" ? "i" : ""
+  ).test(command);
+}
+function windowsExistingProcessList() {
+  const output = execFileSync2(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `@(Get-CimInstance Win32_Process -Filter "Name='Antigravity IDE.exe'") | Select-Object ProcessId,CommandLine,ExecutablePath | ConvertTo-Json -Compress`
+    ],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }
+  );
+  const parsed = output.trim() ? JSON.parse(output) : [];
+  const processes = Array.isArray(parsed) ? parsed : [parsed];
+  return processes.map((entry) => {
+    if (!entry.CommandLine || !entry.ExecutablePath) throw new Error("Cannot inspect an Antigravity IDE process.");
+    return `${entry.ProcessId} ${entry.CommandLine}`;
+  }).join("\n");
+}
+function getExistingAntigravityIdePids(profileDir = getDefaultAntigravityIdeProfileDir(), processList = process.platform === "win32" ? windowsExistingProcessList : strictProcessList, mainOnly = false) {
+  const binary = findAntigravityIdeBinary();
+  if (!binary) throw new Error("Cannot locate Antigravity IDE for process inspection.");
+  const bundle = process.platform === "darwin" ? binary.slice(0, binary.indexOf(".app/") + 4) : "";
+  return processList().split("\n").flatMap((line) => {
+    const match = line.trim().match(/^(\d+)\s+(.*)$/);
+    if (!match) return [];
+    const pid = Number(match[1]);
+    const command = match[2];
+    if (pid <= 0 || pid === process.pid) return [];
+    const helper = /(?:^|\s)--type=/.test(command);
+    if (mainOnly && helper) return [];
+    let correctExecutable = false;
+    if (process.platform === "darwin") {
+      correctExecutable = command.startsWith(`${bundle}/Contents/MacOS/`) || helper && command.startsWith(`${bundle}/Contents/Frameworks/`);
+    } else if (process.platform === "win32") {
+      const prefix = command.startsWith('"') ? `"${binary}"` : binary;
+      correctExecutable = command.toLowerCase().startsWith(prefix.toLowerCase());
+    } else {
+      correctExecutable = command === binary || command.startsWith(`${binary} `);
+    }
+    if (!correctExecutable) return [];
+    const specified = /(?:^|\s)--user-data-dir(?:=|\s)/.test(command);
+    if (specified ? !commandMatchesProfile(command, profileDir) : helper) return [];
+    return [pid];
+  });
+}
+function isExistingAntigravityIdeRunning(profileDir, processList) {
+  return getExistingAntigravityIdePids(profileDir, processList).length > 0;
+}
+function quitExistingAntigravityIde(profileDir) {
+  for (const pid of getExistingAntigravityIdePids(profileDir, void 0, true)) {
+    if (process.platform === "win32") {
+      execFileSync2(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          `$p = Get-Process -Id ${pid} -ErrorAction Stop; [void]$p.CloseMainWindow()`
+        ],
+        { stdio: ["ignore", "pipe", "pipe"] }
+      );
+    } else {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+      }
+    }
+  }
+}
+async function waitForExistingAntigravityIdeQuit(profileDir, options = {}) {
+  const running = () => getExistingAntigravityIdePids(profileDir, options.processList).length > 0;
+  const deadline = Date.now() + (options.timeoutMs ?? 5e3);
+  while (Date.now() < deadline) {
+    if (!running()) return true;
+    await sleep(options.pollIntervalMs ?? 200);
+  }
+  return !running();
+}
+function forceQuitExistingAntigravityIde(profileDir) {
+  for (const pid of getExistingAntigravityIdePids(profileDir)) {
+    if (process.platform === "win32") {
+      execFileSync2("taskkill", ["/PID", String(pid), "/T", "/F"], { stdio: ["ignore", "pipe", "pipe"] });
+    } else {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+      }
+    }
+  }
+}
 function findAntigravityAppBinary() {
   const override = getAppPathOverride("antigravity");
-  if (override) return existsSync8(override) ? override : null;
+  if (override) return existsSync9(override) ? override : null;
   if (process.platform === "win32") {
-    const localAppData = process.env["LOCALAPPDATA"] ?? join11(homedir9(), "AppData", "Local");
-    const winPath = join11(localAppData, "Programs", "Antigravity", "Antigravity.exe");
-    return existsSync8(winPath) ? winPath : null;
+    const localAppData = process.env["LOCALAPPDATA"] ?? join12(homedir9(), "AppData", "Local");
+    const winPath = join12(localAppData, "Programs", "Antigravity", "Antigravity.exe");
+    return existsSync9(winPath) ? winPath : null;
   }
   if (process.platform === "linux") return linuxAntigravityBinary();
   if (process.platform !== "darwin") return null;
   const defaultPath = "/Applications/Antigravity.app/Contents/MacOS/Antigravity";
-  if (existsSync8(defaultPath)) return defaultPath;
-  const homePath = join11(homedir9(), "Applications", "Antigravity.app", "Contents", "MacOS", "Antigravity");
-  if (existsSync8(homePath)) return homePath;
+  if (existsSync9(defaultPath)) return defaultPath;
+  const homePath = join12(homedir9(), "Applications", "Antigravity.app", "Contents", "MacOS", "Antigravity");
+  if (existsSync9(homePath)) return homePath;
   return null;
 }
 function findAntigravityIdeBinary() {
   const override = getAppPathOverride("antigravity-ide");
-  if (override) return existsSync8(override) ? override : null;
+  if (override) return existsSync9(override) ? override : null;
   if (process.platform === "win32") {
-    const localAppData = process.env["LOCALAPPDATA"] ?? join11(homedir9(), "AppData", "Local");
-    const winPath = join11(localAppData, "Programs", "Antigravity IDE", "Antigravity IDE.exe");
-    return existsSync8(winPath) ? winPath : null;
+    const localAppData = process.env["LOCALAPPDATA"] ?? join12(homedir9(), "AppData", "Local");
+    const winPath = join12(localAppData, "Programs", "Antigravity IDE", "Antigravity IDE.exe");
+    return existsSync9(winPath) ? winPath : null;
   }
   if (process.platform === "linux") return linuxAntigravityBinary();
   if (process.platform !== "darwin") return null;
   const defaultPath = "/Applications/Antigravity IDE.app/Contents/Resources/app/bin/antigravity-ide";
-  if (existsSync8(defaultPath)) return defaultPath;
-  const homePath = join11(homedir9(), "Applications", "Antigravity IDE.app", "Contents", "Resources", "app", "bin", "antigravity-ide");
-  if (existsSync8(homePath)) return homePath;
+  if (existsSync9(defaultPath)) return defaultPath;
+  const homePath = join12(homedir9(), "Applications", "Antigravity IDE.app", "Contents", "Resources", "app", "bin", "antigravity-ide");
+  if (existsSync9(homePath)) return homePath;
   return null;
 }
 function launchAntigravityApp(env, profileDir, gatewayUrl, extraArgs) {
@@ -11122,12 +11741,14 @@ function launchAntigravityApp(env, profileDir, gatewayUrl, extraArgs) {
     });
   });
 }
-function launchAntigravityIde(env, profileDir, gatewayUrl, extraArgs) {
+function launchAntigravityIde(env, profileDir, gatewayUrl, extraArgs, options = {}) {
   return new Promise((resolve2) => {
     let settled = false;
+    let checkInterval;
     const settle = (code) => {
       if (settled) return;
       settled = true;
+      if (checkInterval) clearInterval(checkInterval);
       resolve2(code);
     };
     const binaryPath = findAntigravityIdeBinary();
@@ -11137,13 +11758,17 @@ function launchAntigravityIde(env, profileDir, gatewayUrl, extraArgs) {
       settle(127);
       return;
     }
-    prepareIdeProfile(profileDir, gatewayUrl);
-    const relayExtensionsDir = join11(homedir9(), ".relay-ai", "antigravity", "extensions");
-    const args = [
-      `--user-data-dir=${profileDir}`,
-      `--extensions-dir=${relayExtensionsDir}`,
-      ...extraArgs
-    ];
+    if (!options.existingProfile) {
+      prepareIdeProfile(profileDir, gatewayUrl);
+    }
+    const args = [];
+    if (!options.existingProfile) {
+      const relayExtensionsDir = join12(homedir9(), ".relay-ai", "antigravity", "extensions");
+      args.push(`--user-data-dir=${profileDir}`, `--extensions-dir=${relayExtensionsDir}`);
+    } else {
+      args.push(`--user-data-dir=${profileDir}`);
+    }
+    args.push(...extraArgs);
     const child = spawn6(binaryPath, args, {
       // GUI app: don't inherit the terminal's stdio (its Electron logs would
       // corrupt relay's interactive prompts) and detach into its own process
@@ -11153,10 +11778,28 @@ function launchAntigravityIde(env, profileDir, gatewayUrl, extraArgs) {
       detached: true,
       env
     });
-    child.on("spawn", () => {
-      settle(0);
-    });
+    if (!options.existingProfile) {
+      child.on("spawn", () => {
+        settle(0);
+      });
+    } else {
+      const deadline = Date.now() + 1e4;
+      checkInterval = setInterval(() => {
+        try {
+          if (getExistingAntigravityIdePids(profileDir, void 0, true).length > 0) {
+            settle(0);
+          } else if (Date.now() > deadline) {
+            console.error("Antigravity IDE did not start within 10 seconds.");
+            settle(1);
+          }
+        } catch (error) {
+          console.error(`Cannot verify Antigravity IDE startup: ${String(error)}`);
+          settle(1);
+        }
+      }, 250);
+    }
     child.on("exit", (code) => {
+      if (options.existingProfile && code === 0) return;
       settle(code ?? 1);
     });
     child.on("error", (err) => {
@@ -11168,7 +11811,7 @@ function launchAntigravityIde(env, profileDir, gatewayUrl, extraArgs) {
 
 // src/antigravity.ts
 import { homedir as homedir10 } from "os";
-import { join as join12 } from "path";
+import { join as join13 } from "path";
 var SHUTDOWN_DRAIN_MS = 500;
 var AGY_FAVORITES_PROVIDER_ID = "__relay_agy_favorites__";
 var AGY_FAVORITES_PROVIDER_LABEL = "\u2B50 Favorites";
@@ -11506,7 +12149,7 @@ async function runAntigravityAppCommand(childArgs, trace = false, boot) {
     trace,
     boot,
     async (env, _routes, gatewayHandle) => {
-      const profileDir = join12(homedir10(), ".relay-ai", "antigravity", "app-profile");
+      const profileDir = join13(homedir10(), ".relay-ai", "antigravity", "app-profile");
       if (isAntigravityAppRunning(profileDir)) {
         const restart = await p12.confirm({
           message: "Restart Antigravity to apply this Relay gateway?",
@@ -11522,7 +12165,7 @@ async function runAntigravityAppCommand(childArgs, trace = false, boot) {
           await waitForAntigravityAppQuit(profileDir);
         }
       }
-      clearAppLastSelectedModel(join12(homedir10(), ".gemini", "antigravity", "antigravity_state.pbtxt"));
+      clearAppLastSelectedModel(join13(homedir10(), ".gemini", "antigravity", "antigravity_state.pbtxt"));
       const launchCode = await launchAntigravityApp(env, profileDir, gatewayHandle.url, childArgs);
       if (launchCode !== 0) return launchCode;
       p12.log.info("Antigravity is using the Relay Cloud Code gateway.");
@@ -11548,59 +12191,149 @@ async function runAntigravityAppCommand(childArgs, trace = false, boot) {
     { childArgs, versionGuard: false, pauseForCapacityWarning: false, effortMode: "submenu" }
   );
 }
+function existingIdeControl(profileDir) {
+  return {
+    isRunning: () => isExistingAntigravityIdeRunning(profileDir),
+    quit: () => quitExistingAntigravityIde(profileDir),
+    waitForQuit: () => waitForExistingAntigravityIdeQuit(profileDir),
+    forceQuit: () => forceQuitExistingAntigravityIde(profileDir)
+  };
+}
+function restoreExistingProfile() {
+  const result = restoreExistingIdeSession(process.env, { allowOwnPid: true });
+  if (!result.restored) throw new Error(result.message ?? "Could not restore the Antigravity IDE profile. Run relay-ai antigravity-ide --restore.");
+  for (const warning of result.warnings ?? []) p12.log.warn(warning);
+  p12.log.success("Restored your Antigravity IDE configuration. The IDE is closed.");
+}
 async function runAntigravityIdeCommand(childArgs, trace = false, boot) {
-  return runAntigravityCommand(
-    "relay-ai antigravity-ide \u2014 Antigravity IDE",
-    "ide",
-    trace,
-    boot,
-    async (env, _routes, gatewayHandle) => {
-      const profileDir = join12(homedir10(), ".relay-ai", "antigravity", "profile");
-      if (isAntigravityIdeRunning(profileDir)) {
-        const restart = await p12.confirm({
-          message: "Restart Antigravity IDE to apply this Relay gateway?",
+  let existingProfileDir;
+  try {
+    const lock = readExistingIdeLock();
+    const separateActiveSession = lock && lock.pid !== process.pid && isProcessAlive(lock.pid);
+    if (boot?.useExistingProfile || boot?.restore || !separateActiveSession) assertNoActiveExistingIdeSession();
+    const pending = separateActiveSession ? null : readExistingIdeRecoveryRecord();
+    if (pending) {
+      acquireExistingIdeSession(pending.profileDir, process.env, { recovery: true });
+      const latest = readExistingIdeRecoveryRecord();
+      if (latest) {
+        p12.log.step("Recovering the previous Antigravity IDE profile...");
+        await stopExistingIde(existingIdeControl(latest.profileDir));
+        restoreExistingProfile();
+      } else {
+        releaseEmptyExistingIdeSession();
+      }
+    } else if (boot?.restore) {
+      if (lock) acquireExistingIdeSession(lock.profileDir);
+      releaseEmptyExistingIdeSession();
+      p12.log.info("Nothing to restore.");
+    }
+    if (boot?.restore) return 0;
+    if (boot?.useExistingProfile) {
+      existingProfileDir = getDefaultAntigravityIdeProfileDir();
+      acquireExistingIdeSession(existingProfileDir);
+    }
+  } catch (error) {
+    p12.log.error(String(error));
+    return 1;
+  }
+  try {
+    return await runAntigravityCommand(
+      "relay-ai antigravity-ide \u2014 Antigravity IDE",
+      "ide",
+      trace,
+      boot,
+      async (env, _routes, gatewayHandle) => {
+        if (boot?.useExistingProfile) {
+          const profileDir2 = existingProfileDir;
+          const control = existingIdeControl(profileDir2);
+          acquireExistingIdeSession(profileDir2);
+          const shutdown = watchExistingIdeShutdown(control.isRunning);
+          let started = false;
+          try {
+            p12.log.warn("Using your existing Antigravity IDE profile and its signed-in Google account.");
+            p12.log.info("Relay will close the IDE, temporarily apply its model catalog, and restore the profile on exit.");
+            await stopExistingIde(control);
+            if (shutdown.interrupted) return 0;
+            beginExistingIdeSession(profileDir2, gatewayHandle.url);
+            started = true;
+            if (shutdown.interrupted) return 0;
+            const launchCode2 = await launchAntigravityIde(env, profileDir2, gatewayHandle.url, childArgs, { existingProfile: true });
+            if (launchCode2 !== 0) return launchCode2;
+            shutdown.launched();
+            p12.log.info("Antigravity IDE is using Relay models. Close the IDE when you are done, or press Ctrl+C to restore your normal configuration.");
+            await waitForExistingIdeShutdownWithConfirm(shutdown, async () => {
+              const choice = await p12.select({
+                message: "Close Antigravity IDE and restore your normal configuration?",
+                options: [
+                  { value: "yes", label: "Yes, close Antigravity IDE and restore config" },
+                  { value: "no", label: "No, keep session running" }
+                ]
+              });
+              return p12.isCancel(choice) || choice === "yes";
+            });
+            return 0;
+          } finally {
+            try {
+              if (started || readExistingIdeRecoveryRecord()?.pid === process.pid) {
+                await stopExistingIde(control);
+                restoreExistingProfile();
+              } else {
+                releaseEmptyExistingIdeSession();
+              }
+            } finally {
+              shutdown.dispose();
+            }
+          }
+        }
+        const profileDir = join13(homedir10(), ".relay-ai", "antigravity", "profile");
+        if (isAntigravityIdeRunning(profileDir)) {
+          const restart = await p12.confirm({
+            message: "Restart Antigravity IDE to apply this Relay gateway?",
+            initialValue: true
+          });
+          if (p12.isCancel(restart) || !restart) {
+            p12.log.info("Quit and reopen Antigravity IDE when you are ready for the new gateway to take effect.");
+            return 0;
+          }
+          quitAntigravityIdeGracefully();
+          if (!await waitForAntigravityIdeQuit(profileDir)) {
+            forceQuitAntigravityIde(profileDir);
+            await waitForAntigravityIdeQuit(profileDir);
+          }
+        }
+        const launchCode = await launchAntigravityIde(env, profileDir, gatewayHandle.url, childArgs);
+        if (launchCode !== 0) return launchCode;
+        p12.log.info("Antigravity IDE is using the Relay Cloud Code gateway.");
+        p12.log.info(pc8.cyan("Press Ctrl+C to stop the gateway."));
+        await waitForShutdown();
+        await new Promise((r) => setTimeout(r, SHUTDOWN_DRAIN_MS));
+        console.log("");
+        p12.log.step("Gateway stopped.");
+        const shouldClose = await p12.confirm({
+          message: "Close Antigravity IDE?",
           initialValue: true
         });
-        if (p12.isCancel(restart) || !restart) {
-          p12.log.info("Quit and reopen Antigravity IDE when you are ready for the new gateway to take effect.");
-          return 0;
+        if (!p12.isCancel(shouldClose) && shouldClose) {
+          p12.log.step("Stopping Antigravity IDE...");
+          quitAntigravityIdeGracefully();
+          if (!await waitForAntigravityIdeQuit(profileDir)) {
+            forceQuitAntigravityIde(profileDir);
+            await waitForAntigravityIdeQuit(profileDir);
+          }
         }
-        quitAntigravityIdeGracefully();
-        if (!await waitForAntigravityIdeQuit(profileDir)) {
-          forceQuitAntigravityIde(profileDir);
-          await waitForAntigravityIdeQuit(profileDir);
-        }
-      }
-      const launchCode = await launchAntigravityIde(env, profileDir, gatewayHandle.url, childArgs);
-      if (launchCode !== 0) return launchCode;
-      p12.log.info("Antigravity IDE is using the Relay Cloud Code gateway.");
-      p12.log.info(pc8.cyan("Press Ctrl+C to stop the gateway."));
-      await waitForShutdown();
-      await new Promise((r) => setTimeout(r, SHUTDOWN_DRAIN_MS));
-      console.log("");
-      p12.log.step("Gateway stopped.");
-      const shouldClose = await p12.confirm({
-        message: "Close Antigravity IDE?",
-        initialValue: true
-      });
-      if (!p12.isCancel(shouldClose) && shouldClose) {
-        p12.log.step("Stopping Antigravity IDE...");
-        quitAntigravityIdeGracefully();
-        if (!await waitForAntigravityIdeQuit(profileDir)) {
-          forceQuitAntigravityIde(profileDir);
-          await waitForAntigravityIdeQuit(profileDir);
-        }
-      }
-      return 0;
-    },
-    { childArgs, versionGuard: false, pauseForCapacityWarning: false }
-  );
+        return 0;
+      },
+      { childArgs, versionGuard: false, pauseForCapacityWarning: false }
+    );
+  } finally {
+    if (existingProfileDir && !readExistingIdeRecoveryRecord()) releaseEmptyExistingIdeSession();
+  }
 }
 
 // src/codex-app.ts
 import pc9 from "picocolors";
 import * as p13 from "@clack/prompts";
-import { join as join15 } from "path";
+import { join as join16 } from "path";
 
 // src/codex/app-provider-routes.ts
 function codexRouteToProxyRoute(provider, model, apiKey) {
@@ -11693,14 +12426,14 @@ async function buildCodexAppProviderCatalogRoutes(provider, apiKey, selectedMode
 }
 
 // src/codex/app-config.ts
-import { existsSync as existsSync9, readFileSync as readFileSync4, rmSync as rmSync3, writeFileSync as writeFileSync4, mkdirSync as mkdirSync4 } from "fs";
-import { dirname as dirname2, join as join13 } from "path";
-import { parse, stringify } from "smol-toml";
+import { existsSync as existsSync10, readFileSync as readFileSync6, rmSync as rmSync4, writeFileSync as writeFileSync5, mkdirSync as mkdirSync5 } from "fs";
+import { dirname as dirname4, join as join14 } from "path";
+import { parse as parse2, stringify } from "smol-toml";
 function getCodexConfigPath() {
-  return join13(getCodexHome(), "config.toml");
+  return join14(getCodexHome(), "config.toml");
 }
 function getCodexAppSidecarProfilePath() {
-  return join13(getCodexHome(), `${CODEX_APP_PROVIDER_ID}.config.toml`);
+  return join14(getCodexHome(), `${CODEX_APP_PROVIDER_ID}.config.toml`);
 }
 function asRecord(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
@@ -11727,12 +12460,12 @@ function isMultiAgentV2Enabled(value) {
   return asRecord(value).enabled === true;
 }
 function readCodexConfigText(path3 = getCodexConfigPath()) {
-  if (!existsSync9(path3)) return "";
-  return readFileSync4(path3, "utf8");
+  if (!existsSync10(path3)) return "";
+  return readFileSync6(path3, "utf8");
 }
 function parseCodexConfig(text6) {
   if (!text6.trim()) return {};
-  return asRecord(parse(text6));
+  return asRecord(parse2(text6));
 }
 function captureRestoreState(text6) {
   const config = parseCodexConfig(text6);
@@ -11877,7 +12610,7 @@ function applyAppConfigPatch(spec, configPath = getCodexConfigPath()) {
   const text6 = `${stringify(merged)}
 `;
   validateAppConfigText(text6, spec);
-  mkdirSync4(dirname2(configPath), { recursive: true });
+  mkdirSync5(dirname4(configPath), { recursive: true });
   atomicWriteFile(configPath, text6);
   const written = readCodexConfigText(configPath);
   if (written !== text6) {
@@ -11926,20 +12659,20 @@ function restoreConfigFromState(state, configPath = getCodexConfigPath()) {
   applyRestoreNumber(config, "model_context_window", state.hadModelContextWindow ?? false, state.modelContextWindow);
   applyRestoreNumber(config, "model_auto_compact_token_limit", state.hadModelAutoCompactTokenLimit ?? false, state.modelAutoCompactTokenLimit);
   const sidecar = getCodexAppSidecarProfilePath();
-  if (existsSync9(sidecar)) {
+  if (existsSync10(sidecar)) {
     try {
-      rmSync3(sidecar, { force: true });
+      rmSync4(sidecar, { force: true });
     } catch {
     }
   }
-  const hadFile = existsSync9(configPath);
+  const hadFile = existsSync10(configPath);
   const empty = Object.keys(config).length === 0 || Object.keys(config).length === 1 && "model_providers" in config && Object.keys(asRecord(config.model_providers)).length === 0;
   if (!hadFile && empty) return false;
   if (empty) {
-    rmSync3(configPath, { force: true });
+    rmSync4(configPath, { force: true });
     return true;
   }
-  writeFileSync4(configPath, `${stringify(config)}
+  writeFileSync5(configPath, `${stringify(config)}
 `, "utf8");
   return true;
 }
@@ -11951,7 +12684,7 @@ function previewAppConfigToml(spec) {
 }
 
 // src/codex/app-readiness.ts
-import { readFileSync as readFileSync5 } from "fs";
+import { readFileSync as readFileSync7 } from "fs";
 function proxyRoot(spec) {
   const base = spec.proxyBaseUrl ?? `http://127.0.0.1:${spec.proxyPort}/v1`;
   if (!base.endsWith("/v1")) throw new Error("Codex App proxy base URL must end in /v1");
@@ -11967,7 +12700,7 @@ async function verifyCodexAppReadiness(spec, options = {}) {
   const root = proxyRoot(spec);
   const health = await checkedJson(`${root}/health`, fetchImpl);
   if (health.ok !== true) throw new Error("Relay proxy health check did not report ready");
-  const catalog = JSON.parse(readFileSync5(spec.catalogPath, "utf8"));
+  const catalog = JSON.parse(readFileSync7(spec.catalogPath, "utf8"));
   if (!Array.isArray(catalog.models) || catalog.models.length === 0) {
     throw new Error("Relay Codex model catalog is empty or invalid");
   }
@@ -11986,33 +12719,33 @@ async function verifyCodexAppReadiness(spec, options = {}) {
 
 // src/codex/app-session.ts
 import {
-  copyFileSync as copyFileSync2,
-  existsSync as existsSync10,
-  mkdirSync as mkdirSync5,
+  copyFileSync as copyFileSync3,
+  existsSync as existsSync11,
+  mkdirSync as mkdirSync6,
   readdirSync as readdirSync2,
-  readFileSync as readFileSync6,
-  rmSync as rmSync4,
+  readFileSync as readFileSync8,
+  rmSync as rmSync5,
   statSync as statSync2
 } from "fs";
-import { basename as basename2, join as join14 } from "path";
-import { createHash as createHash4 } from "crypto";
+import { basename as basename2, join as join15 } from "path";
+import { createHash as createHash5 } from "crypto";
 function getAppSessionLockPath(env = process.env) {
-  return join14(getRelayAiCodexDir(env), "session-app.json");
+  return join15(getRelayAiCodexDir(env), "session-app.json");
 }
 function getAppRestoreStatePath(env = process.env) {
-  return join14(getRelayAiCodexDir(env), "app-restore-state.json");
+  return join15(getRelayAiCodexDir(env), "app-restore-state.json");
 }
 function getAppCatalogPath(providerId, env = process.env) {
-  return join14(getRelayAiCodexDir(env), `app-models-${providerId}.json`);
+  return join15(getRelayAiCodexDir(env), `app-models-${providerId}.json`);
 }
-function fileSha256(path3) {
-  return createHash4("sha256").update(readFileSync6(path3)).digest("hex");
+function fileSha2562(path3) {
+  return createHash5("sha256").update(readFileSync8(path3)).digest("hex");
 }
 function readAppSessionLock(env = process.env) {
   const path3 = getAppSessionLockPath(env);
-  if (!existsSync10(path3)) return null;
+  if (!existsSync11(path3)) return null;
   try {
-    const parsed = JSON.parse(readFileSync6(path3, "utf8"));
+    const parsed = JSON.parse(readFileSync8(path3, "utf8"));
     if (typeof parsed.pid === "number" && typeof parsed.startedAt === "string") return parsed;
   } catch {
   }
@@ -12024,13 +12757,13 @@ function writeAppSessionLock(lock, env = process.env) {
 }
 function clearAppSessionLock(env = process.env) {
   const path3 = getAppSessionLockPath(env);
-  if (existsSync10(path3)) rmSync4(path3, { force: true });
+  if (existsSync11(path3)) rmSync5(path3, { force: true });
 }
 function readAppRestoreState(env = process.env) {
   const path3 = getAppRestoreStatePath(env);
-  if (!existsSync10(path3)) return null;
+  if (!existsSync11(path3)) return null;
   try {
-    return JSON.parse(readFileSync6(path3, "utf8"));
+    return JSON.parse(readFileSync8(path3, "utf8"));
   } catch {
     return null;
   }
@@ -12042,17 +12775,17 @@ function writeAppRestoreState(state, env = process.env) {
 }
 function clearAppRestoreState(env = process.env) {
   const path3 = getAppRestoreStatePath(env);
-  if (existsSync10(path3)) rmSync4(path3, { force: true });
+  if (existsSync11(path3)) rmSync5(path3, { force: true });
 }
 function backupConfigToml(env = process.env) {
   const configPath = getCodexConfigPath();
-  if (!existsSync10(configPath)) return void 0;
+  if (!existsSync11(configPath)) return void 0;
   rotateBackups(configPath, env);
   const backupsDir = getBackupsDir(env);
-  mkdirSync5(backupsDir, { recursive: true });
+  mkdirSync6(backupsDir, { recursive: true });
   const base = basename2(configPath);
-  const backupPath = join14(backupsDir, `${base}.${Date.now()}.bak`);
-  copyFileSync2(configPath, backupPath);
+  const backupPath = join15(backupsDir, `${base}.${Date.now()}.bak`);
+  copyFileSync3(configPath, backupPath);
   return backupPath;
 }
 function saveAppRestoreStateBeforePatch(env = process.env) {
@@ -12067,14 +12800,14 @@ function saveAppRestoreStateBeforePatch(env = process.env) {
 }
 function ownedAppCatalogPaths(env = process.env) {
   const codexDir = getRelayAiCodexDir(env);
-  if (!existsSync10(codexDir)) return [];
-  return readdirSync2(codexDir).filter((n) => n.startsWith("app-models-") && n.endsWith(".json")).map((n) => join14(codexDir, n));
+  if (!existsSync11(codexDir)) return [];
+  return readdirSync2(codexDir).filter((n) => n.startsWith("app-models-") && n.endsWith(".json")).map((n) => join15(codexDir, n));
 }
 function removeAppCatalogs(env = process.env) {
   const removed = [];
   for (const path3 of ownedAppCatalogPaths(env)) {
     try {
-      rmSync4(path3, { force: true });
+      rmSync5(path3, { force: true });
       removed.push(path3);
     } catch {
     }
@@ -12083,10 +12816,10 @@ function removeAppCatalogs(env = process.env) {
 }
 function newestConfigBackup(env = process.env) {
   const backupDir = getBackupsDir(env);
-  if (!existsSync10(backupDir)) return null;
+  if (!existsSync11(backupDir)) return null;
   const configBase = basename2(getCodexConfigPath());
   const candidates = readdirSync2(backupDir).filter((name) => name.startsWith(`${configBase}.`) && name.endsWith(".bak")).map((name) => {
-    const path3 = join14(backupDir, name);
+    const path3 = join15(backupDir, name);
     try {
       return { path: path3, mtimeMs: statSync2(path3).mtimeMs };
     } catch {
@@ -12113,17 +12846,17 @@ function restoreCodexAppOverlay(env = process.env) {
     return { restored: false, message: "Nothing to restore." };
   }
   const exactBackupIsSafe = Boolean(
-    managed && lock?.backupPath && existsSync10(lock.backupPath) && lock.patchedConfigSha256 && lock.originalConfigSha256 && fileSha256(getCodexConfigPath()) === lock.patchedConfigSha256 && fileSha256(lock.backupPath) === lock.originalConfigSha256
+    managed && lock?.backupPath && existsSync11(lock.backupPath) && lock.patchedConfigSha256 && lock.originalConfigSha256 && fileSha2562(getCodexConfigPath()) === lock.patchedConfigSha256 && fileSha2562(lock.backupPath) === lock.originalConfigSha256
   );
   if (exactBackupIsSafe) {
-    copyFileSync2(lock.backupPath, getCodexConfigPath());
+    copyFileSync3(lock.backupPath, getCodexConfigPath());
   } else if (restoreState) {
     restoreConfigFromState(restoreState);
-  } else if (lock?.backupPath && existsSync10(lock.backupPath)) {
-    copyFileSync2(lock.backupPath, getCodexConfigPath());
+  } else if (lock?.backupPath && existsSync11(lock.backupPath)) {
+    copyFileSync3(lock.backupPath, getCodexConfigPath());
   } else if (managed) {
     const backupPath = newestConfigBackup(env);
-    if (backupPath) copyFileSync2(backupPath, getCodexConfigPath());
+    if (backupPath) copyFileSync3(backupPath, getCodexConfigPath());
   }
   removeAppCatalogs(env);
   clearAppRestoreState(env);
@@ -12420,8 +13153,8 @@ async function runCodexAppVertexLaunch(configOnly, trace = false) {
       restoreStatePath: getAppRestoreStatePath(),
       backupPath,
       proxyPort,
-      patchedConfigSha256: fileSha256(getCodexConfigPath()),
-      ...backupPath ? { originalConfigSha256: fileSha256(backupPath) } : {}
+      patchedConfigSha256: fileSha2562(getCodexConfigPath()),
+      ...backupPath ? { originalConfigSha256: fileSha2562(backupPath) } : {}
     });
     p13.log.info(`Vertex AI \xB7 ${selectedEntry.display_name} \u2014 project: ${config.project} / location: ${config.location}`);
     logProxy(proxyPort);
@@ -12705,7 +13438,7 @@ Mixed Codex App mode is unavailable: ${err instanceof Error ? err.message : err}
     }
   };
   try {
-    const catalogPath = mixedPlan ? join15(getRelayAiCodexDir(), "app-models-mixed.json") : favoritesActive && resolvedFavorites.length > 0 ? getFavoritesAppCatalogPath() : getAppCatalogPath(route.providerId);
+    const catalogPath = mixedPlan ? join16(getRelayAiCodexDir(), "app-models-mixed.json") : favoritesActive && resolvedFavorites.length > 0 ? getFavoritesAppCatalogPath() : getAppCatalogPath(route.providerId);
     const activeRoute = mixedPlan ? {
       tier: "proxy",
       modelId: mixedPlan.selectedSlug,
@@ -12855,8 +13588,8 @@ Mixed Codex App mode is unavailable: ${err instanceof Error ? err.message : err}
       restoreStatePath: getAppRestoreStatePath(),
       backupPath,
       proxyPort,
-      patchedConfigSha256: fileSha256(getCodexConfigPath()),
-      ...backupPath ? { originalConfigSha256: fileSha256(backupPath) } : {}
+      patchedConfigSha256: fileSha2562(getCodexConfigPath()),
+      ...backupPath ? { originalConfigSha256: fileSha2562(backupPath) } : {}
     });
     const prevRecent = prefs.recentModelsByProvider?.[activeProvider.id] ?? [];
     const updatedRecent = [selectedModel.id, ...prevRecent.filter((id) => id !== selectedModel.id)].slice(0, 3);
@@ -12914,33 +13647,33 @@ import pc10 from "picocolors";
 import * as p14 from "@clack/prompts";
 
 // src/claude-desktop/app-config.ts
-import { existsSync as existsSync11, readFileSync as readFileSync7, writeFileSync as writeFileSync5, mkdirSync as mkdirSync6 } from "fs";
+import { existsSync as existsSync12, readFileSync as readFileSync9, writeFileSync as writeFileSync6, mkdirSync as mkdirSync7 } from "fs";
 import { homedir as homedir11 } from "os";
-import { join as join16, dirname as dirname3 } from "path";
-import { randomUUID as randomUUID3 } from "crypto";
+import { join as join17, dirname as dirname5 } from "path";
+import { randomUUID as randomUUID4 } from "crypto";
 function getClaudeDesktopHome() {
   if (process.platform === "win32") {
-    return join16(process.env.LOCALAPPDATA || join16(homedir11(), "AppData", "Local"), "Claude-3p");
+    return join17(process.env.LOCALAPPDATA || join17(homedir11(), "AppData", "Local"), "Claude-3p");
   }
   if (process.platform === "linux") {
-    return join16(process.env.XDG_CONFIG_HOME || join16(homedir11(), ".config"), "Claude-3p");
+    return join17(process.env.XDG_CONFIG_HOME || join17(homedir11(), ".config"), "Claude-3p");
   }
-  return join16(homedir11(), "Library", "Application Support", "Claude-3p");
+  return join17(homedir11(), "Library", "Application Support", "Claude-3p");
 }
 function getConfigLibraryPath() {
-  return join16(getClaudeDesktopHome(), "configLibrary");
+  return join17(getClaudeDesktopHome(), "configLibrary");
 }
 function getMetaJsonPath() {
-  return join16(getConfigLibraryPath(), "_meta.json");
+  return join17(getConfigLibraryPath(), "_meta.json");
 }
 function getClaudeDesktopConfigJsonPath() {
-  return join16(getClaudeDesktopHome(), "claude_desktop_config.json");
+  return join17(getClaudeDesktopHome(), "claude_desktop_config.json");
 }
 function readDesktopConfigJson() {
   const path3 = getClaudeDesktopConfigJsonPath();
-  if (!existsSync11(path3)) return {};
+  if (!existsSync12(path3)) return {};
   try {
-    const parsed = JSON.parse(readFileSync7(path3, "utf8"));
+    const parsed = JSON.parse(readFileSync9(path3, "utf8"));
     return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
@@ -12948,8 +13681,8 @@ function readDesktopConfigJson() {
 }
 function writeDesktopConfigJson(config) {
   const path3 = getClaudeDesktopConfigJsonPath();
-  mkdirSync6(dirname3(path3), { recursive: true });
-  writeFileSync5(path3, `${JSON.stringify(config, null, 2)}
+  mkdirSync7(dirname5(path3), { recursive: true });
+  writeFileSync6(path3, `${JSON.stringify(config, null, 2)}
 `, "utf8");
 }
 function readDeploymentMode() {
@@ -12972,17 +13705,17 @@ function restoreDeploymentMode(previous) {
 }
 function readMetaJson() {
   const metaPath = getMetaJsonPath();
-  if (!existsSync11(metaPath)) return null;
+  if (!existsSync12(metaPath)) return null;
   try {
-    return JSON.parse(readFileSync7(metaPath, "utf8"));
+    return JSON.parse(readFileSync9(metaPath, "utf8"));
   } catch {
     return null;
   }
 }
 function writeMetaJson(meta) {
   const metaPath = getMetaJsonPath();
-  mkdirSync6(dirname3(metaPath), { recursive: true });
-  writeFileSync5(metaPath, `${JSON.stringify(meta, null, 2)}
+  mkdirSync7(dirname5(metaPath), { recursive: true });
+  writeFileSync6(metaPath, `${JSON.stringify(meta, null, 2)}
 `, "utf8");
 }
 function buildRelayAiConfig(proxyPort) {
@@ -12995,11 +13728,11 @@ function buildRelayAiConfig(proxyPort) {
   };
 }
 function writeRelayAiConfig(proxyPort) {
-  const uuid = randomUUID3();
-  const configPath = join16(getConfigLibraryPath(), `${uuid}.json`);
+  const uuid = randomUUID4();
+  const configPath = join17(getConfigLibraryPath(), `${uuid}.json`);
   const config = buildRelayAiConfig(proxyPort);
-  mkdirSync6(dirname3(configPath), { recursive: true });
-  writeFileSync5(configPath, `${JSON.stringify(config, null, 2)}
+  mkdirSync7(dirname5(configPath), { recursive: true });
+  writeFileSync6(configPath, `${JSON.stringify(config, null, 2)}
 `, "utf8");
   const meta = readMetaJson() || { appliedId: "", entries: [] };
   meta.appliedId = uuid;
@@ -13183,24 +13916,24 @@ function expandClaudeAppEffortVariants(models, max = MAX_MODEL_CATALOG) {
 
 // src/claude-desktop/app-session.ts
 import {
-  copyFileSync as copyFileSync3,
-  existsSync as existsSync12,
-  mkdirSync as mkdirSync7,
-  readFileSync as readFileSync8,
+  copyFileSync as copyFileSync4,
+  existsSync as existsSync13,
+  mkdirSync as mkdirSync8,
+  readFileSync as readFileSync10,
   renameSync as renameSync2,
-  rmSync as rmSync5,
-  unlinkSync as unlinkSync2,
-  writeFileSync as writeFileSync6
+  rmSync as rmSync6,
+  unlinkSync as unlinkSync3,
+  writeFileSync as writeFileSync7
 } from "fs";
-import { dirname as dirname4, join as join17 } from "path";
+import { dirname as dirname6, join as join18 } from "path";
 function getSessionLockPath2() {
-  return join17(getClaudeDesktopHome(), ".relay-ai.lock");
+  return join18(getClaudeDesktopHome(), ".relay-ai.lock");
 }
 function inspectSessionLock() {
   const path3 = getSessionLockPath2();
-  if (!existsSync12(path3)) return { status: "missing" };
+  if (!existsSync13(path3)) return { status: "missing" };
   try {
-    const parsed = JSON.parse(readFileSync8(path3, "utf8"));
+    const parsed = JSON.parse(readFileSync10(path3, "utf8"));
     if (typeof parsed.pid === "number" && typeof parsed.startedAt === "string" && typeof parsed.uuid === "string" && typeof parsed.proxyPort === "number") {
       return { status: "valid", lock: parsed };
     }
@@ -13211,14 +13944,14 @@ function inspectSessionLock() {
 function writeSessionLock2(lock) {
   const path3 = getSessionLockPath2();
   const tempPath = `${path3}.tmp.${process.pid}`;
-  mkdirSync7(dirname4(path3), { recursive: true });
+  mkdirSync8(dirname6(path3), { recursive: true });
   try {
-    writeFileSync6(tempPath, `${JSON.stringify(lock, null, 2)}
+    writeFileSync7(tempPath, `${JSON.stringify(lock, null, 2)}
 `, "utf8");
     renameSync2(tempPath, path3);
   } finally {
     try {
-      rmSync5(tempPath, { force: true });
+      rmSync6(tempPath, { force: true });
     } catch {
     }
   }
@@ -13235,16 +13968,16 @@ function isProcessAlive3(pid) {
 function backupMetaJson() {
   const metaPath = getMetaJsonPath();
   const backupPath = `${metaPath}.bak`;
-  if (existsSync12(metaPath) && !existsSync12(backupPath)) {
-    copyFileSync3(metaPath, backupPath);
+  if (existsSync13(metaPath) && !existsSync13(backupPath)) {
+    copyFileSync4(metaPath, backupPath);
   }
 }
 function restoreMetaJson() {
   const metaPath = getMetaJsonPath();
   const backupPath = `${metaPath}.bak`;
-  if (existsSync12(backupPath)) {
-    copyFileSync3(backupPath, metaPath);
-    unlinkSync2(backupPath);
+  if (existsSync13(backupPath)) {
+    copyFileSync4(backupPath, metaPath);
+    unlinkSync3(backupPath);
   }
 }
 function restoreDeploymentModeFromLock(lock) {
@@ -13259,10 +13992,10 @@ function safeCleanupStep(label, fn) {
   }
 }
 function removeRelayAiConfig(uuid) {
-  const configPath = join17(getConfigLibraryPath(), `${uuid}.json`);
-  if (existsSync12(configPath)) {
+  const configPath = join18(getConfigLibraryPath(), `${uuid}.json`);
+  if (existsSync13(configPath)) {
     try {
-      rmSync5(configPath, { force: true });
+      rmSync6(configPath, { force: true });
     } catch {
     }
   }
@@ -13284,7 +14017,7 @@ function recoverSession() {
   if (state.status === "unreadable") {
     safeCleanupStep("restore _meta.json", restoreMetaJson);
     try {
-      rmSync5(getSessionLockPath2(), { force: true });
+      rmSync6(getSessionLockPath2(), { force: true });
     } catch {
     }
     return { recovered: true, message: "Cleared a corrupt claude-app session lock and restored shared config." };
@@ -13303,7 +14036,7 @@ function recoverSession() {
     safeCleanupStep("restore deploymentMode", () => restoreDeploymentModeFromLock(lock));
     removeRelayAiConfig(lock.uuid);
     try {
-      rmSync5(getSessionLockPath2(), { force: true });
+      rmSync6(getSessionLockPath2(), { force: true });
     } catch {
     }
   } else {
@@ -13337,12 +14070,12 @@ function cleanupSession(uuid) {
     safeCleanupStep("restore _meta.json", restoreMetaJson);
     safeCleanupStep("restore deploymentMode", () => restoreDeploymentModeFromLock(lock));
     try {
-      rmSync5(getSessionLockPath2(), { force: true });
+      rmSync6(getSessionLockPath2(), { force: true });
     } catch {
     }
   }
   const meta = readMetaJson();
-  const configIsReferenced = meta === null ? existsSync12(getMetaJsonPath()) : meta.appliedId === uuid || meta.entries.some((entry) => entry.id === uuid);
+  const configIsReferenced = meta === null ? existsSync13(getMetaJsonPath()) : meta.appliedId === uuid || meta.entries.some((entry) => entry.id === uuid);
   if (!sharedStateIsOwnedElsewhere || !configIsReferenced) {
     removeRelayAiConfig(uuid);
   }
@@ -13611,17 +14344,17 @@ ${pc10.bold("Claude Desktop 3P Mode Active")}`);
 }
 
 // src/ai-doc.ts
-import { existsSync as existsSync13, mkdirSync as mkdirSync8, readFileSync as readFileSync9, writeFileSync as writeFileSync7 } from "fs";
+import { existsSync as existsSync14, mkdirSync as mkdirSync9, readFileSync as readFileSync11, writeFileSync as writeFileSync8 } from "fs";
 import { homedir as homedir12 } from "os";
-import { join as join18 } from "path";
+import { join as join19 } from "path";
 var SKILL_DIR_NAME = "relay-ai-cli";
 var SKILL_INSTALL_DIRS = [
-  join18(getAppHome(), "skills"),
-  join18(homedir12(), ".claude", "skills"),
-  join18(homedir12(), ".agents", "skills"),
-  join18(homedir12(), ".codex", "skills"),
-  join18(homedir12(), ".cursor", "skills"),
-  join18(homedir12(), ".cursor", "skills-cursor")
+  join19(getAppHome(), "skills"),
+  join19(homedir12(), ".claude", "skills"),
+  join19(homedir12(), ".agents", "skills"),
+  join19(homedir12(), ".codex", "skills"),
+  join19(homedir12(), ".cursor", "skills"),
+  join19(homedir12(), ".cursor", "skills-cursor")
 ];
 function parseSkillVersion(content) {
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
@@ -13635,10 +14368,10 @@ function parseSkillVersion(content) {
   return null;
 }
 function readInstalledSkillVersion(skillDir) {
-  const skillPath = join18(skillDir, "SKILL.md");
-  if (!existsSync13(skillPath)) return null;
+  const skillPath = join19(skillDir, "SKILL.md");
+  if (!existsSync14(skillPath)) return null;
   try {
-    const head = readFileSync9(skillPath, "utf-8").slice(0, 1024);
+    const head = readFileSync11(skillPath, "utf-8").slice(0, 1024);
     return parseSkillVersion(head.includes("---", 4) ? head : `${head}
 ---
 `);
@@ -13648,8 +14381,8 @@ function readInstalledSkillVersion(skillDir) {
 }
 function skillInstallTargets() {
   return SKILL_INSTALL_DIRS.map((dir) => {
-    const skillDir = join18(dir, SKILL_DIR_NAME);
-    return { skillDir, skillPath: join18(skillDir, "SKILL.md") };
+    const skillDir = join19(dir, SKILL_DIR_NAME);
+    return { skillDir, skillPath: join19(skillDir, "SKILL.md") };
   });
 }
 function formatProviderModels(provider) {
@@ -14155,8 +14888,8 @@ function installAiDoc(opts = {}) {
         result.skipped.push(skillPath);
         continue;
       }
-      mkdirSync8(skillDir, { recursive: true });
-      writeFileSync7(skillPath, doc, "utf-8");
+      mkdirSync9(skillDir, { recursive: true });
+      writeFileSync8(skillPath, doc, "utf-8");
       if (previous) {
         result.updated.push({ path: skillPath, fromVersion: previous });
       } else {
@@ -14314,18 +15047,18 @@ function buildHttpProxyChildEnv(baseEnv, proxyUrl, caCertPath) {
 }
 
 // src/http-proxy/ca.ts
-import { randomBytes as randomBytes3, randomUUID as randomUUID4 } from "crypto";
+import { randomBytes as randomBytes3, randomUUID as randomUUID5 } from "crypto";
 import {
   chmodSync as chmodSync3,
-  existsSync as existsSync14,
-  mkdirSync as mkdirSync10,
-  readFileSync as readFileSync10,
+  existsSync as existsSync15,
+  mkdirSync as mkdirSync11,
+  readFileSync as readFileSync12,
   readdirSync as readdirSync3,
-  rmSync as rmSync6,
+  rmSync as rmSync7,
   statSync as statSync3,
-  writeFileSync as writeFileSync9
+  writeFileSync as writeFileSync10
 } from "fs";
-import { dirname as dirname6, join as join20, resolve } from "path";
+import { dirname as dirname8, join as join21, resolve } from "path";
 import forge from "node-forge";
 var SESSION_ROOT = "http-proxy-sessions";
 var OWNER_FILE = "owner.pid";
@@ -14345,44 +15078,44 @@ function processIsRunning(pid) {
   }
 }
 function cleanupStaleHttpProxySessions(appHome = getAppHome()) {
-  const root = join20(appHome, SESSION_ROOT);
-  if (!existsSync14(root)) return;
+  const root = join21(appHome, SESSION_ROOT);
+  if (!existsSync15(root)) return;
   const now = Date.now();
   for (const name of readdirSync3(root)) {
-    const sessionDir = join20(root, name);
+    const sessionDir = join21(root, name);
     try {
       const stat = statSync3(sessionDir);
       if (!stat.isDirectory()) continue;
-      const ownerPath = join20(sessionDir, OWNER_FILE);
-      if (!existsSync14(ownerPath)) {
+      const ownerPath = join21(sessionDir, OWNER_FILE);
+      if (!existsSync15(ownerPath)) {
         if (now - stat.mtimeMs > MID_CREATION_GRACE_MS) {
-          rmSync6(sessionDir, { recursive: true, force: true });
+          rmSync7(sessionDir, { recursive: true, force: true });
         }
         continue;
       }
-      const pid = Number(readFileSync10(ownerPath, "utf8").trim());
+      const pid = Number(readFileSync12(ownerPath, "utf8").trim());
       if (!Number.isSafeInteger(pid) || pid <= 0) {
         const ownerStat = statSync3(ownerPath);
         const newestMtimeMs = Math.max(stat.mtimeMs, ownerStat.mtimeMs);
         if (now - newestMtimeMs > MID_CREATION_GRACE_MS) {
-          rmSync6(sessionDir, { recursive: true, force: true });
+          rmSync7(sessionDir, { recursive: true, force: true });
         }
         continue;
       }
-      if (!processIsRunning(pid)) rmSync6(sessionDir, { recursive: true, force: true });
+      if (!processIsRunning(pid)) rmSync7(sessionDir, { recursive: true, force: true });
     } catch {
     }
   }
 }
 function createHttpProxyCertificates(appHome = getAppHome()) {
   cleanupStaleHttpProxySessions(appHome);
-  const root = join20(appHome, SESSION_ROOT);
-  mkdirSync10(root, { recursive: true, mode: 448 });
+  const root = join21(appHome, SESSION_ROOT);
+  mkdirSync11(root, { recursive: true, mode: 448 });
   chmodSync3(root, 448);
-  const sessionDir = join20(root, randomUUID4());
-  mkdirSync10(sessionDir, { mode: 448 });
+  const sessionDir = join21(root, randomUUID5());
+  mkdirSync11(sessionDir, { mode: 448 });
   chmodSync3(sessionDir, 448);
-  writeFileSync9(join20(sessionDir, OWNER_FILE), `${process.pid}
+  writeFileSync10(join21(sessionDir, OWNER_FILE), `${process.pid}
 `, { mode: 384 });
   try {
     const caKeys = forge.pki.rsa.generateKeyPair(2048);
@@ -14417,14 +15150,14 @@ function createHttpProxyCertificates(appHome = getAppHome()) {
     ]);
     server.sign(caKeys.privateKey, forge.md.sha256.create());
     const caCert = forge.pki.certificateToPem(ca);
-    const caCertPath = join20(sessionDir, "relay-ai-ca.pem");
-    writeFileSync9(caCertPath, caCert, { encoding: "utf8", mode: 384 });
+    const caCertPath = join21(sessionDir, "relay-ai-ca.pem");
+    writeFileSync10(caCertPath, caCert, { encoding: "utf8", mode: 384 });
     chmodSync3(caCertPath, 384);
     let cleaned = false;
     const cleanupOnExit = () => {
       if (cleaned) return;
       cleaned = true;
-      rmSync6(sessionDir, { recursive: true, force: true });
+      rmSync7(sessionDir, { recursive: true, force: true });
     };
     const cleanupOnSighup = () => {
       cleanupOnExit();
@@ -14451,7 +15184,7 @@ function createHttpProxyCertificates(appHome = getAppHome()) {
       cleanup
     };
   } catch (error) {
-    rmSync6(sessionDir, { recursive: true, force: true });
+    rmSync7(sessionDir, { recursive: true, force: true });
     throw error;
   }
 }
@@ -14460,11 +15193,11 @@ function createHttpProxyCaBundle(relayCaCertPath, additionalCaCertPath) {
   if (resolve(additionalCaCertPath) === resolve(relayCaCertPath)) {
     return relayCaCertPath;
   }
-  const relayCa = readFileSync10(relayCaCertPath, "utf8").trimEnd();
-  const additionalCa = readFileSync10(additionalCaCertPath, "utf8").trim();
+  const relayCa = readFileSync12(relayCaCertPath, "utf8").trimEnd();
+  const additionalCa = readFileSync12(additionalCaCertPath, "utf8").trim();
   if (!additionalCa) return relayCaCertPath;
-  const combinedPath = join20(dirname6(relayCaCertPath), "combined-ca.pem");
-  writeFileSync9(
+  const combinedPath = join21(dirname8(relayCaCertPath), "combined-ca.pem");
+  writeFileSync10(
     combinedPath,
     `${relayCa}
 ${additionalCa}
@@ -15390,6 +16123,14 @@ function parseArgs(args) {
         parsed2.claudeArgs.push(...rest.slice(i + 1));
         break;
       }
+      if (first === "antigravity-ide" && arg === "--use-existing-profile") {
+        parsed2.useExistingProfile = true;
+        continue;
+      }
+      if (first === "antigravity-ide" && arg === "--restore") {
+        parsed2.restore = true;
+        continue;
+      }
       if (arg === "--trace") {
         parsed2.trace = true;
         continue;
@@ -15409,6 +16150,15 @@ function parseArgs(args) {
         continue;
       }
       parsed2.claudeArgs.push(arg);
+    }
+    if (parsed2.useExistingProfile) {
+      const conflicting = parsed2.claudeArgs.find(
+        (a) => a === "--user-data-dir" || a.startsWith("--user-data-dir=") || a === "--extensions-dir" || a.startsWith("--extensions-dir=") || a === "--profile" || a.startsWith("--profile=")
+      );
+      if (conflicting) {
+        parsed2.error = "--use-existing-profile cannot be combined with " + conflicting.split("=")[0];
+        return parsed2;
+      }
     }
     return parsed2;
   }
@@ -15710,6 +16460,8 @@ ${pc11.bold("Usage:")}
 ${pc11.bold("Relay options:")}
   --provider <id>    Use a specific provider (skip picker)
   --model <id>       Use a specific model (skip picker)
+  --use-existing-profile Use existing profile instead of isolated Relay profile
+  --restore          Restore normal configuration if previous session crashed
   --trace            Write debug log to ~/.relay-ai/logs/antigravity-ide-debug.log
   -h, --help         Show this help
   -v, --version      Show version
@@ -15717,7 +16469,8 @@ ${pc11.bold("Relay options:")}
 ${pc11.bold("How it works:")}
   Creates an isolated Relay-managed IDE profile, starts a local Cloud Code
   gateway, and injects Relay AI models into Antigravity's native picker.
-  The normal IDE profile is never modified.
+  By default, the normal IDE profile is never modified. With --use-existing-profile,
+  Relay temporarily applies its catalog to your normal profile and restores on exit.
 
 ${pc11.bold("Platform:")}
   macOS (Apple Silicon) \u2014 other platforms coming after testing.
@@ -16487,7 +17240,7 @@ Options:
   --trace    Write debug logs under ~/.relay-ai/logs/`);
       return 0;
     }
-    const { runUiCommand } = await import("./ui-command-CBAW5DDR.js");
+    const { runUiCommand } = await import("./ui-command-L7P5S3RU.js");
     return runUiCommand({ trace: parsed.trace, serverMode: parsed.uiServerMode });
   }
   if (parsed.command === "models") {
@@ -16615,7 +17368,9 @@ Options:
     }
     return runAntigravityIdeCommand(parsed.claudeArgs, parsed.trace, {
       launchProvider: parsed.launchProvider,
-      launchModel: parsed.launchModel
+      launchModel: parsed.launchModel,
+      useExistingProfile: parsed.useExistingProfile,
+      restore: parsed.restore
     });
   }
   if (parsed.showVersion) {

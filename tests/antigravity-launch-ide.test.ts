@@ -8,8 +8,11 @@ import {
   launchAntigravityIde,
   waitForAntigravityAppQuit,
   waitForAntigravityIdeQuit,
+  getDefaultAntigravityIdeProfileDir,
+  isExistingAntigravityIdeRunning,
+  getExistingAntigravityIdePids,
 } from '../src/antigravity/launch-ide.js';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -179,5 +182,41 @@ describe('antigravity launch-ide', () => {
     expect(processListCalls).toBeGreaterThanOrEqual(2);
 
     fs.rmSync(tempProfile, { recursive: true, force: true });
+  });
+
+  describe('existing profile process management', () => {
+    it.skipIf(!findAntigravityIdeBinary())('resolves default profile directory', () => {
+      const dir = getDefaultAntigravityIdeProfileDir();
+      expect(dir).toBeDefined();
+      if (process.platform === 'darwin') {
+        expect(dir).toContain(path.join('Library', 'Application Support', 'Antigravity IDE'));
+      }
+    });
+
+    it.skipIf(process.platform !== 'darwin' || !findAntigravityIdeBinary())('identifies normal unmanaged Antigravity IDE Electron main process and ignores helpers', () => {
+      const defaultDir = getDefaultAntigravityIdeProfileDir();
+      const sampleList = [
+        '81843 /Applications/Antigravity IDE.app/Contents/MacOS/Electron',
+        '81844 /Applications/Antigravity IDE.app/Contents/Frameworks/Antigravity IDE Helper (GPU).app/Contents/MacOS/Antigravity IDE Helper (GPU) --type=gpu-process',
+        `88310 /Applications/Antigravity IDE.app/Contents/MacOS/Electron --user-data-dir=${path.join(os.homedir(), '.relay-ai', 'antigravity', 'profile')}`,
+      ].join('\n');
+
+      const pids = getExistingAntigravityIdePids(defaultDir, () => sampleList);
+      expect(pids).toContain(81843);
+      expect(isExistingAntigravityIdeRunning(defaultDir, () => sampleList)).toBe(true);
+    });
+
+    it.skipIf(process.platform !== 'darwin' || !findAntigravityIdeBinary())('launches the normal profile with its existing extensions', async () => {
+      const defaultDir = getDefaultAntigravityIdeProfileDir();
+      const env = { ...process.env, CLOUD_CODE_URL: 'http://127.0.0.1:12345' };
+      vi.mocked(execFileSync).mockReturnValue(`81843 /Applications/Antigravity IDE.app/Contents/MacOS/Electron --user-data-dir=${defaultDir}`);
+
+      const code = await launchAntigravityIde(env, defaultDir, 'http://127.0.0.1:12345', [], { existingProfile: true });
+      expect(code).toBe(0);
+      const args = vi.mocked(spawn).mock.calls.at(-1)?.[1] as string[];
+      expect(args).toContain(`--user-data-dir=${defaultDir}`);
+      expect(args.some(a => a.startsWith('--extensions-dir='))).toBe(false);
+      vi.mocked(execFileSync).mockReset();
+    });
   });
 });

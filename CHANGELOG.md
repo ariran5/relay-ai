@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.15.15] - 2026-10-14
+
+### Added
+
+- **Antigravity IDE can run with your existing profile.** `relay-ai antigravity-ide --use-existing-profile` launches your normal Antigravity IDE — existing chats, extensions, settings, and signed-in Google account included — against the Relay Cloud Code gateway. Relay locks the profile, waits for a running IDE to exit, applies only the gateway URL (JSONC-preserving) and the launch model, then restores the original settings and model pick when the IDE closes, printing a confirmation. Ctrl+C asks first ("Close Antigravity IDE and restore your normal configuration?"); the isolated Relay profile remains the default. An interrupted session is repaired on the next launch, or with `relay-ai antigravity-ide --restore`.
+- **`relay` is a new CLI alias** for `relay-ai`, alongside `relayai`.
+
+### Changed
+
+- **The `relai` alias was removed.** Use `relay` or `relayai`.
+
 ## [0.15.14] - 2026-10-09
 
 ### Fixed

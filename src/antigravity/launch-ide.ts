@@ -1,7 +1,7 @@
 import { execFileSync, execSync, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, normalize } from 'node:path';
 import { prepareIdeProfile } from './ide-profile.js';
 import { getAppPathOverride } from '../config.js';
 
@@ -115,6 +115,20 @@ function defaultProcessList(): string {
   }
 }
 
+function strictProcessList(): string {
+  const psArgs = process.platform === 'linux'
+    ? ['-eo', 'pid=,args=']
+    : ['-axo', 'pid=,command='];
+  if (process.platform !== 'darwin' && process.platform !== 'linux') {
+    throw new Error(`Process listing not supported on platform: ${process.platform}`);
+  }
+  return execFileSync('ps', psArgs, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 1024 * 1024 * 8,
+  });
+}
+
 export function isAntigravityIdeRunning(profileDir: string, processList = defaultProcessList): boolean {
   if (process.platform === 'win32') return winIsProcessRunningForProfile('Antigravity IDE.exe', profileDir);
   const output = processList();
@@ -206,6 +220,130 @@ export function quitAntigravityAppGracefully(): void {
     execFileSync('osascript', ['-e', 'tell application id "com.google.antigravity" to quit'], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+  }
+}
+
+/** Resolve the installed product's normal Electron user-data directory. */
+export function getDefaultAntigravityIdeProfileDir(): string {
+  const binary = findAntigravityIdeBinary();
+  if (!binary) throw new Error('Antigravity IDE not found.');
+  const appDir = process.platform === 'darwin'
+    ? join(binary.slice(0, binary.indexOf('.app/') + 4), 'Contents', 'Resources', 'app')
+    : join(dirname(binary), 'resources', 'app');
+  const product = JSON.parse(readFileSync(join(appDir, 'product.json'), 'utf8')) as { nameShort?: string };
+  const name = product.nameShort;
+  if (!name || /[\\/]/.test(name) || name === '.' || name === '..') {
+    throw new Error('Cannot identify the installed Antigravity IDE profile.');
+  }
+  const base = process.platform === 'darwin'
+    ? join(homedir(), 'Library', 'Application Support')
+    : process.platform === 'win32'
+      ? process.env['APPDATA'] ?? join(homedir(), 'AppData', 'Roaming')
+      : process.env['XDG_CONFIG_HOME'] ?? join(homedir(), '.config');
+  const profile = join(base, name);
+  if (!existsSync(join(profile, 'User'))) {
+    throw new Error('The normal Antigravity IDE profile was not found. Open the IDE normally first.');
+  }
+  return profile;
+}
+
+/** ps leaves spaces in arguments unquoted; terminate an unquoted path at the next flag. */
+export function commandUserDataDir(command: string): string | undefined {
+  const match = command.match(/(?:^|\s)--user-data-dir(?:=|\s+)(?:"([^"]+)"|'([^']+)'|(.+?)(?=\s+--|$))/);
+  return match ? (match[1] ?? match[2] ?? match[3]).trim() : undefined;
+}
+
+function commandMatchesProfile(command: string, profile: string): boolean {
+  const escaped = normalize(profile).replace(/[\\/]$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|\\s)--user-data-dir(?:=|\\s+)(?:"${escaped}"|'${escaped}'|${escaped})(?=\\s|$)`,
+    process.platform === 'win32' ? 'i' : '').test(command);
+}
+
+function windowsExistingProcessList(): string {
+  const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    `@(Get-CimInstance Win32_Process -Filter "Name='Antigravity IDE.exe'") | Select-Object ProcessId,CommandLine,ExecutablePath | ConvertTo-Json -Compress`],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const parsed = output.trim() ? JSON.parse(output) : [];
+  const processes = Array.isArray(parsed) ? parsed : [parsed];
+  return processes.map((entry: { ProcessId: number; CommandLine: string; ExecutablePath: string }) => {
+    if (!entry.CommandLine || !entry.ExecutablePath) throw new Error('Cannot inspect an Antigravity IDE process.');
+    return `${entry.ProcessId} ${entry.CommandLine}`;
+  }).join('\n');
+}
+
+export function getExistingAntigravityIdePids(
+  profileDir = getDefaultAntigravityIdeProfileDir(),
+  processList = process.platform === 'win32' ? windowsExistingProcessList : strictProcessList,
+  mainOnly = false,
+): number[] {
+  const binary = findAntigravityIdeBinary();
+  if (!binary) throw new Error('Cannot locate Antigravity IDE for process inspection.');
+  const bundle = process.platform === 'darwin' ? binary.slice(0, binary.indexOf('.app/') + 4) : '';
+  return processList().split('\n').flatMap(line => {
+    const match = line.trim().match(/^(\d+)\s+(.*)$/);
+    if (!match) return [];
+    const pid = Number(match[1]);
+    const command = match[2];
+    if (pid <= 0 || pid === process.pid) return [];
+    const helper = /(?:^|\s)--type=/.test(command);
+    if (mainOnly && helper) return [];
+    let correctExecutable = false;
+    if (process.platform === 'darwin') {
+      correctExecutable = command.startsWith(`${bundle}/Contents/MacOS/`)
+        || (helper && command.startsWith(`${bundle}/Contents/Frameworks/`));
+    } else if (process.platform === 'win32') {
+      const prefix = command.startsWith('"') ? `"${binary}"` : binary;
+      correctExecutable = command.toLowerCase().startsWith(prefix.toLowerCase());
+    } else {
+      correctExecutable = command === binary || command.startsWith(`${binary} `);
+    }
+    if (!correctExecutable) return [];
+    const specified = /(?:^|\s)--user-data-dir(?:=|\s)/.test(command);
+    if (specified ? !commandMatchesProfile(command, profileDir) : helper) return [];
+    return [pid];
+  });
+}
+
+export function isExistingAntigravityIdeRunning(profileDir: string, processList?: () => string): boolean {
+  return getExistingAntigravityIdePids(profileDir, processList).length > 0;
+}
+
+export function quitExistingAntigravityIde(profileDir: string): void {
+  for (const pid of getExistingAntigravityIdePids(profileDir, undefined, true)) {
+    if (process.platform === 'win32') {
+      execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        `$p = Get-Process -Id ${pid} -ErrorAction Stop; [void]$p.CloseMainWindow()`],
+        { stdio: ['ignore', 'pipe', 'pipe'] });
+    } else {
+      try { process.kill(pid, 'SIGTERM'); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
+    }
+  }
+}
+
+export async function waitForExistingAntigravityIdeQuit(
+  profileDir: string,
+  options: ProcessListOptions & { timeoutMs?: number; pollIntervalMs?: number } = {},
+): Promise<boolean> {
+  const running = () => getExistingAntigravityIdePids(profileDir, options.processList).length > 0;
+  const deadline = Date.now() + (options.timeoutMs ?? 5_000);
+  while (Date.now() < deadline) {
+    if (!running()) return true;
+    await sleep(options.pollIntervalMs ?? 200);
+  }
+  return !running();
+}
+
+export function forceQuitExistingAntigravityIde(profileDir: string): void {
+  for (const pid of getExistingAntigravityIdePids(profileDir)) {
+    if (process.platform === 'win32') {
+      execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    } else {
+      try { process.kill(pid, 'SIGKILL'); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
+    }
   }
 }
 
@@ -335,12 +473,15 @@ export function launchAntigravityIde(
   profileDir: string,
   gatewayUrl: string,
   extraArgs: string[],
+  options: { existingProfile?: boolean } = {},
 ): Promise<number> {
   return new Promise((resolve) => {
     let settled = false;
+    let checkInterval: ReturnType<typeof setInterval> | undefined;
     const settle = (code: number): void => {
       if (settled) return;
       settled = true;
+      if (checkInterval) clearInterval(checkInterval);
       resolve(code);
     };
     const binaryPath = findAntigravityIdeBinary();
@@ -351,17 +492,21 @@ export function launchAntigravityIde(
       return;
     }
 
-    // 1. Prepare the isolated profile and set jetski.cloudCodeUrl
-    prepareIdeProfile(profileDir, gatewayUrl);
+    if (!options.existingProfile) {
+      // 1. Prepare the isolated profile and set jetski.cloudCodeUrl
+      prepareIdeProfile(profileDir, gatewayUrl);
+    }
 
     // 2. Build VS Code arguments
-    // Keep Relay's Antigravity profile fully isolated from the normal IDE profile.
-    const relayExtensionsDir = join(homedir(), '.relay-ai', 'antigravity', 'extensions');
-    const args = [
-      `--user-data-dir=${profileDir}`,
-      `--extensions-dir=${relayExtensionsDir}`,
-      ...extraArgs,
-    ];
+    const args: string[] = [];
+    if (!options.existingProfile) {
+      // Keep Relay's Antigravity profile fully isolated from the normal IDE profile.
+      const relayExtensionsDir = join(homedir(), '.relay-ai', 'antigravity', 'extensions');
+      args.push(`--user-data-dir=${profileDir}`, `--extensions-dir=${relayExtensionsDir}`);
+    } else {
+      args.push(`--user-data-dir=${profileDir}`);
+    }
+    args.push(...extraArgs);
 
     const child = spawn(binaryPath, args, {
       // GUI app: don't inherit the terminal's stdio (its Electron logs would
@@ -373,11 +518,30 @@ export function launchAntigravityIde(
       env,
     });
 
-    child.on('spawn', () => {
-      settle(0);
-    });
+    if (!options.existingProfile) {
+      child.on('spawn', () => {
+        settle(0);
+      });
+    } else {
+      // For existing profile, wait up to 10s for the actual main Electron process to appear
+      const deadline = Date.now() + 10_000;
+      checkInterval = setInterval(() => {
+        try {
+          if (getExistingAntigravityIdePids(profileDir, undefined, true).length > 0) {
+            settle(0);
+          } else if (Date.now() > deadline) {
+            console.error('Antigravity IDE did not start within 10 seconds.');
+            settle(1);
+          }
+        } catch (error) {
+          console.error(`Cannot verify Antigravity IDE startup: ${String(error)}`);
+          settle(1);
+        }
+      }, 250);
+    }
 
     child.on('exit', (code) => {
+      if (options.existingProfile && code === 0) return;
       settle(code ?? 1);
     });
 

@@ -163,6 +163,10 @@ export interface ParsedArgs {
   serverQuick?: boolean;
   /** One-run listen override for `relay-ai server`. */
   serverListenMode?: 'local' | 'network';
+  /** Use existing Antigravity IDE profile instead of isolated relay profile. */
+  useExistingProfile?: boolean;
+  /** Restore modified existing profile after crash or interruption. */
+  restore?: boolean;
   /** One-run provider exposure mode for `relay-ai server`. */
   serverProvidersMode?: 'all' | 'favorites' | 'specific';
   /** One-run provider ids when serverProvidersMode is `specific`. */

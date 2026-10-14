@@ -20,6 +20,42 @@ This use is probably not what Google intended, may violate Google's terms of ser
 
 Relay also detects Gemini Enterprise (work) logins before launch and warns with a confirmation prompt (`Proceed with the enterprise account?`, default No) to prevent accidental usage policy violations on company accounts.
 
+## Antigravity IDE Profiles
+
+By default, Relay AI launches Antigravity IDE with an **isolated profile** at `~/.relay-ai/antigravity/profile`. This ensures:
+
+- Your normal IDE settings and extensions are never modified.
+- You can sign into a secondary/throwaway Google account in the Relay instance while keeping your main account in your regular Antigravity IDE.
+- Existing chats and extensions remain in your regular profile and are not visible in the isolated profile.
+
+### Using your existing IDE profile (`--use-existing-profile`)
+
+If you want to use Relay models directly inside your regular Antigravity IDE setup with your existing chats, extensions, and signed-in account:
+
+```bash
+relay-ai antigravity-ide --use-existing-profile
+```
+
+When launched with this flag:
+
+1. Relay detects if Antigravity IDE is running, closes it gracefully, and waits for all processes to exit before patching.
+2. Relay temporarily switches the model catalog to Relay's catalog and points `jetski.cloudCodeUrl` in your profile settings to the local Relay Cloud Code gateway.
+3. Close the IDE when you are done, or press Ctrl+C. Ctrl+C asks first: choose **Yes, close Antigravity IDE and restore config**, or **No, keep session running** to leave the session as is. On exit, Relay closes the IDE, restores your normal configuration, prints a confirmation, and leaves the IDE closed.
+
+The IDE keeps the Google account already signed into your normal profile. Model requests go through your configured Relay providers. The separate profile lets you use a secondary account as a precaution; it doesn't guarantee protection from account restrictions or bans.
+
+Save your work before launching. Relay may force-close the target instance if graceful shutdown doesn't complete. During the session, the picker shows Relay's catalog rather than Google's native catalog. Relay preserves unrelated settings you edit, and restores the original gateway setting and remembered model selection. Custom user-data directories, extension directories, and named IDE profiles can't be combined with this flag.
+
+If an existing-profile session crashes or is terminated unexpectedly, restore normal settings with:
+
+```bash
+relay-ai antigravity-ide --restore
+```
+
+Relay also checks for interrupted sessions before the next IDE launch. Recovery closes the affected IDE and leaves it closed. If restoration fails, Relay retains its recovery files so you can fix the reported problem and retry. A second Relay session can't modify the same normal profile while the first is active.
+
+If an interruption happens while acquiring the recovery lock itself, Relay may report a retained `.reclaim` guard file. Confirm the other recovery process has exited before removing only the guard file named in the error, then retry `--restore`. Keep the backup and recovery record.
+
 ## What the model picker shows
 
 Every entry names the provider it comes from, e.g. `gemini-3.8-flash (Relay - Google Gemini)`, so the same model from two providers is easy to tell apart.

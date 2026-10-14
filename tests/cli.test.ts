@@ -431,7 +431,8 @@ describe('help text', () => {
     expect(help).toContain('every\n  effort level it supports');
     expect(help).toContain('Binary aliases:');
     expect(help).toContain('relayai');
-    expect(help).toContain('relai');
+    expect(help).toContain('relay       Same CLI as relay-ai (shortest)');
+    expect(help).not.toContain('relai');
   });
 
   it('claude help includes starter options, providers, and switch menu', () => {
@@ -726,5 +727,32 @@ describe('parseArgs — antigravity commands', () => {
 
   it('passes antigravity-ide passthrough args unchanged', () => {
     expect(parseArgs(['antigravity-ide', '--user-data-dir', '/tmp/test']).claudeArgs).toEqual(['--user-data-dir', '/tmp/test']);
+  });
+
+  it('parses antigravity-ide --use-existing-profile', () => {
+    expect(parseArgs(['antigravity-ide', '--use-existing-profile'])).toMatchObject({
+      command: 'antigravity-ide',
+      useExistingProfile: true,
+      claudeArgs: [],
+    });
+  });
+
+  it('parses antigravity-ide --restore', () => {
+    expect(parseArgs(['antigravity-ide', '--restore'])).toMatchObject({
+      command: 'antigravity-ide',
+      restore: true,
+      claudeArgs: [],
+    });
+  });
+
+  it('rejects --use-existing-profile combined with profile arguments', () => {
+    expect(parseArgs(['antigravity-ide', '--use-existing-profile', '--user-data-dir=/tmp/test']).error)
+      .toBe('--use-existing-profile cannot be combined with --user-data-dir');
+    expect(parseArgs(['antigravity-ide', '--use-existing-profile', '--extensions-dir=/tmp/ext']).error)
+      .toBe('--use-existing-profile cannot be combined with --extensions-dir');
+    expect(parseArgs(['antigravity-ide', '--use-existing-profile', '--profile=Custom']).error)
+      .toBe('--use-existing-profile cannot be combined with --profile');
+    expect(parseArgs(['antigravity-ide', '--use-existing-profile', '--', '--user-data-dir=/tmp/test']).error)
+      .toBe('--use-existing-profile cannot be combined with --user-data-dir');
   });
 });

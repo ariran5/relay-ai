@@ -134,7 +134,7 @@ relay-ai launches Claude Code, OpenAI Codex, Google Gemini CLI, and desktop apps
 against YOUR provider registry (Groq, Mistral, OpenAI, Zen/Go, Ollama, custom endpoints, …).
 It handles API translation, local proxies, env isolation, and model routing.
 
-Binary aliases: relayai and relai run the same CLI (e.g. relai claude --provider groq --model <model-id> -p "<prompt>").
+Binary aliases: relay and relayai run the same CLI (e.g. relay claude --provider groq --model <model-id> -p "<prompt>").
 
 SKILL VERSIONING
   The installed skill version matches relay-ai --version (currently v${VERSION}).

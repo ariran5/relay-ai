@@ -90,7 +90,7 @@ To fully remove the tool and all its configuration data, you can delete the conf
 
 ## Commands
 
-> **Shorter names:** `relayai` and `relai` are aliases for `relay-ai` — every command below works with any of them (e.g. `relai agy`).
+> **Shorter names:** `relay` and `relayai` are aliases for `relay-ai` — every command below works with any of them (e.g. `relay agy`).
 
 | Command | Description |
 |---------|-------------|
@@ -448,7 +448,8 @@ In agy, each model is one row with agy's Low / Medium / High / Max effort slider
 ```bash
 relay-ai agy
 relay-ai antigravity
-relay-ai antigravity-ide
+relay-ai antigravity-ide                     # isolated profile (default)
+relay-ai antigravity-ide --use-existing-profile # use existing profile, chats & extensions
 ```
 
 > ⚠️ **Do not use your main Google account with Antigravity support.**
