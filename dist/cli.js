@@ -2,7 +2,7 @@
 import {
   addManualModel,
   removeManualModel
-} from "./chunk-CRVHJY4H.js";
+} from "./chunk-EXZENW4X.js";
 import {
   CODEX_APP_AUTO_COMPACT_RATIO,
   CODEX_APP_PROVIDER_ID,
@@ -130,7 +130,7 @@ import {
   upstreamModelId,
   waitForCodexAppQuit,
   zenRegistryStub
-} from "./chunk-IKGQWXB3.js";
+} from "./chunk-YTQC5BT3.js";
 import {
   filterTemplates,
   getTemplateById,
@@ -228,7 +228,7 @@ import {
   upstreamHttpStatus,
   validateCustomEndpointUrl,
   writeSecureLogLine
-} from "./chunk-KXSYWQOJ.js";
+} from "./chunk-K5UGOJPF.js";
 import "./chunk-JIDIH7DS.js";
 
 // src/cli.ts
@@ -14454,7 +14454,7 @@ relay-ai launches Claude Code, OpenAI Codex, Google Gemini CLI, and desktop apps
 against YOUR provider registry (Groq, Mistral, OpenAI, Zen/Go, Ollama, custom endpoints, \u2026).
 It handles API translation, local proxies, env isolation, and model routing.
 
-Binary aliases: relayai and relai run the same CLI (e.g. relai claude --provider groq --model <model-id> -p "<prompt>").
+Binary aliases: relay and relayai run the same CLI (e.g. relay claude --provider groq --model <model-id> -p "<prompt>").
 
 SKILL VERSIONING
   The installed skill version matches relay-ai --version (currently v${VERSION}).
@@ -16245,8 +16245,8 @@ ${pc11.bold("Commands:")}
   claude-app  Launch Claude Desktop app with registry providers (macOS + Windows + Linux)
 
 ${pc11.bold("Binary aliases:")}
+  relay       Same CLI as relay-ai (shortest)
   relayai     Same CLI as relay-ai (shorter to type)
-  relai       Same CLI as relay-ai (shortest)
 
 ${pc11.bold("Favorites:")}
   agy, antigravity, and antigravity-ide list the selected launch model at every
@@ -17240,7 +17240,7 @@ Options:
   --trace    Write debug logs under ~/.relay-ai/logs/`);
       return 0;
     }
-    const { runUiCommand } = await import("./ui-command-L7P5S3RU.js");
+    const { runUiCommand } = await import("./ui-command-CFZVTYY5.js");
     return runUiCommand({ trace: parsed.trace, serverMode: parsed.uiServerMode });
   }
   if (parsed.command === "models") {
