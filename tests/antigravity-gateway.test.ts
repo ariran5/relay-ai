@@ -7,6 +7,7 @@ import {
   type CloudCodeGatewayHandle,
 } from '../src/antigravity/cloud-code-gateway.js';
 import type { AntigravityRoute } from '../src/antigravity/types.js';
+import { ANTIGRAVITY_USER_AGENT } from '../src/oauth/antigravity-oauth.js';
 
 vi.mock('ai', () => {
   return {
@@ -739,7 +740,7 @@ describe('cloud-code-gateway', () => {
         upstreamBodies.push(JSON.parse(String(init?.body ?? '{}')));
         expect(init?.headers).toMatchObject({
           Authorization: 'Bearer cloud-code-token',
-          'User-Agent': 'vscode/1.X.X (Antigravity/4.2.0)',
+          'User-Agent': ANTIGRAVITY_USER_AGENT,
         });
         return new Response('data: {"response":{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}}\n\n', {
           status: 200,

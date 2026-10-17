@@ -346,6 +346,14 @@ describe('declared-first effort resolution', () => {
     expect(caps.levels).toEqual(['low', 'high']);
   });
 
+  it('maps Gemini 4 Argon models to thinkingLevel rather than thinkingBudget', () => {
+    const caps = getReasoningCapabilities('@ai-sdk/google', 'gemini-4-argon-medium');
+    expect(caps.levels).toEqual(['low', 'medium', 'high']);
+    expect(caps.source).toBe('provider-rule');
+    expect(effortProviderOptions('@ai-sdk/google', 'high', 'gemini-4-argon-medium'))
+      .toEqual({ google: { thinkingConfig: { thinkingLevel: 'high', includeThoughts: true } } });
+  });
+
   it('keeps Gemini 2.5 on its budget mapping even when effort levels are declared', () => {
     const metadata = { reasoningEffortLevels: ['low', 'high'] };
     const caps = getReasoningCapabilities('@ai-sdk/google', 'gemini-2.5-pro', metadata);

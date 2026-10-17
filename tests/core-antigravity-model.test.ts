@@ -7,7 +7,7 @@ import { generateText, isStepCount, streamText, tool } from 'ai';
 import { z } from 'zod';
 import { createRelayModel } from '../src/core/model.js';
 import { isRelayCoreError } from '../src/core/errors.js';
-import { ANTIGRAVITY_BASE_URLS } from '../src/oauth/antigravity-oauth.js';
+import { ANTIGRAVITY_BASE_URLS, ANTIGRAVITY_USER_AGENT } from '../src/oauth/antigravity-oauth.js';
 
 const ACCESS_CANARY = 'ya29.canary-access-token-zzz';
 const REFRESH_CANARY = '1//canary-refresh-token-zzz';
@@ -287,7 +287,7 @@ describe('createRelayModel Cloud Code Assist routes', () => {
     const url = requestUrl(fetchMock.mock.calls[0]!);
     expect(url).toBe(`${ANTIGRAVITY_BASE_URLS[0]}/v1internal:streamGenerateContent?alt=sse`);
     expect(headerValue(fetchMock.mock.calls[0]!, 'Authorization')).toBe(`Bearer ${ACCESS_CANARY}`);
-    expect(headerValue(fetchMock.mock.calls[0]!, 'User-Agent')).toBe('vscode/1.X.X (Antigravity/4.2.0)');
+    expect(headerValue(fetchMock.mock.calls[0]!, 'User-Agent')).toBe(ANTIGRAVITY_USER_AGENT);
     expect(headerValue(fetchMock.mock.calls[0]!, 'Content-Type')).toBe('application/json');
     expect(requestInit(fetchMock.mock.calls[0]!).signal).toBe(abort.signal);
 
@@ -296,7 +296,7 @@ describe('createRelayModel Cloud Code Assist routes', () => {
     expect(envelope.model).toBe(UPSTREAM_MODEL);
     expect(envelope.requestType).toBe('agent');
     expect(envelope.enabledCreditTypes).toEqual(['GOOGLE_ONE_AI']);
-    expect(envelope.userAgent).toBe('vscode/1.X.X (Antigravity/4.2.0)');
+    expect(envelope.userAgent).toBe(ANTIGRAVITY_USER_AGENT);
     expect(envelope.requestId).toEqual(expect.stringMatching(
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     ));

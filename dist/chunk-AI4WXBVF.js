@@ -7,7 +7,7 @@ import { join } from "path";
 // package.json
 var package_default = {
   name: "@jacobbd/relay-ai",
-  version: "0.15.15",
+  version: "0.15.16",
   publishConfig: {
     access: "public"
   },
@@ -1800,8 +1800,9 @@ var SCOPES = [
   "https://www.googleapis.com/auth/cclog",
   "https://www.googleapis.com/auth/experimentsandconfigs"
 ].join(" ");
-var ANTIGRAVITY_VERSION = "4.2.0";
-var ANTIGRAVITY_USER_AGENT = `vscode/1.X.X (Antigravity/${ANTIGRAVITY_VERSION})`;
+var osType = process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "windows" : "linux";
+var archType = process.arch === "arm64" ? "arm64" : "x64";
+var ANTIGRAVITY_USER_AGENT = `antigravity/2.22.0 (aidev_client; os_type=${osType}; arch=${archType}; cl=997489728; auth_method=oauth)`;
 var ANTIGRAVITY_METADATA = { ideType: "ANTIGRAVITY" };
 var ANTIGRAVITY_BASE_URLS = [
   "https://daily-cloudcode-pa.googleapis.com",
@@ -5418,11 +5419,11 @@ function isClaudeReasoningModel(modelId) {
 }
 function isGeminiReasoningModel(modelId) {
   const lower = modelId.toLowerCase();
-  return lower.startsWith("gemini-2.5-") || lower.startsWith("gemini-3") || lower.startsWith("gemini-3.");
+  return lower.startsWith("gemini-2.5-") || lower.startsWith("gemini-3") || lower.startsWith("gemini-3.") || lower.startsWith("gemini-4") || lower.startsWith("gemini-4.");
 }
 function isGemini3Model(modelId) {
   const lower = modelId.toLowerCase();
-  return lower.startsWith("gemini-3") || lower.startsWith("gemini-3.");
+  return lower.startsWith("gemini-3") || lower.startsWith("gemini-3.") || lower.startsWith("gemini-4") || lower.startsWith("gemini-4.");
 }
 function isMistralReasoningModel(modelId) {
   const lower = modelId.toLowerCase();
@@ -7440,6 +7441,7 @@ export {
   runClaudeCodeOAuthFlow,
   fetchClaudeCodeModels,
   guiCallbackRedirectUri,
+  ANTIGRAVITY_USER_AGENT,
   ANTIGRAVITY_BASE_URLS,
   buildAntigravityAuthUrl,
   runAntigravityOAuthFlow,
@@ -7481,4 +7483,4 @@ export {
   streamAnthropicResponse,
   generateAnthropicResponse
 };
-//# sourceMappingURL=chunk-K5UGOJPF.js.map
+//# sourceMappingURL=chunk-AI4WXBVF.js.map

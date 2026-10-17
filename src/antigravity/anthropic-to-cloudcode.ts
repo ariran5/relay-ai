@@ -3,6 +3,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { splitToolUseId } from '../proxy-shared.js';
+import { ANTIGRAVITY_USER_AGENT } from '../oauth/antigravity-oauth.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -15,7 +16,6 @@ const DEFAULT_SAFETY_SETTINGS = [
   { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'OFF' },
 ];
 
-const ANTIGRAVITY_USER_AGENT = 'vscode/1.X.X (Antigravity/4.2.0)';
 const MIN_ANTIGRAVITY_OUTPUT_TOKENS = 1024;
 
 // Draft-meta keywords that Cloud Code rejects — strip them from tool schemas.

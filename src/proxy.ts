@@ -16,6 +16,7 @@ import {
   selectBetaFlags,
 } from './oauth/claude-identity.js';
 import { anthropicToCloudCode } from './antigravity/anthropic-to-cloudcode.js';
+import { ANTIGRAVITY_USER_AGENT } from './oauth/antigravity-oauth.js';
 import { streamCloudCodeToAnthropic, collectCloudCodeToAnthropic } from './antigravity/cloudcode-to-anthropic.js';
 import { createLanguageModel, isSdkMigratedNpm, maxToolsForNpm } from './provider-factory.js';
 import { randomUUID } from 'node:crypto';
@@ -442,7 +443,7 @@ export function startProxyCatalog(
             headers: {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${token}`,
-              'User-Agent': 'vscode/1.X.X (Antigravity/4.2.0)',
+              'User-Agent': ANTIGRAVITY_USER_AGENT,
             },
             body: JSON.stringify(envelope),
           });

@@ -2,7 +2,7 @@
 import {
   addManualModel,
   removeManualModel
-} from "./chunk-EXZENW4X.js";
+} from "./chunk-WNADO255.js";
 import {
   CODEX_APP_AUTO_COMPACT_RATIO,
   CODEX_APP_PROVIDER_ID,
@@ -130,7 +130,7 @@ import {
   upstreamModelId,
   waitForCodexAppQuit,
   zenRegistryStub
-} from "./chunk-YTQC5BT3.js";
+} from "./chunk-NLTXYC3J.js";
 import {
   filterTemplates,
   getTemplateById,
@@ -141,6 +141,7 @@ import {
 } from "./chunk-3R25QO5X.js";
 import {
   ANTIGRAVITY_BASE_URLS,
+  ANTIGRAVITY_USER_AGENT,
   BACKENDS,
   CODEX_RESPONSES_LITE_VERSION,
   CODEX_RESPONSES_LITE_WS_URL,
@@ -228,7 +229,7 @@ import {
   upstreamHttpStatus,
   validateCustomEndpointUrl,
   writeSecureLogLine
-} from "./chunk-K5UGOJPF.js";
+} from "./chunk-AI4WXBVF.js";
 import "./chunk-JIDIH7DS.js";
 
 // src/cli.ts
@@ -10266,7 +10267,7 @@ async function handleCloudCodeForwardRequest(res, route, parsed, lowerUrl, log14
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${route.apiKey}`,
-      "User-Agent": "vscode/1.X.X (Antigravity/4.2.0)"
+      "User-Agent": ANTIGRAVITY_USER_AGENT
     },
     body: JSON.stringify(upstreamBody)
   });
@@ -17240,7 +17241,7 @@ Options:
   --trace    Write debug logs under ~/.relay-ai/logs/`);
       return 0;
     }
-    const { runUiCommand } = await import("./ui-command-CFZVTYY5.js");
+    const { runUiCommand } = await import("./ui-command-7IVQUBYD.js");
     return runUiCommand({ trace: parsed.trace, serverMode: parsed.uiServerMode });
   }
   if (parsed.command === "models") {

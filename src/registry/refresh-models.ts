@@ -34,7 +34,7 @@ import {
 import type { CachedModel, ProviderRegistry, RegistryProvider } from './types.js';
 import { buildOpenAiOAuthModels, CHATGPT_CODEX_UNSUPPORTED_MODELS } from '../data/openai-oauth-models.js';
 import { buildXaiOAuthModels } from '../data/xai-oauth-models.js';
-import { ANTIGRAVITY_BASE_URLS } from '../oauth/antigravity-oauth.js';
+import { ANTIGRAVITY_BASE_URLS, ANTIGRAVITY_USER_AGENT } from '../oauth/antigravity-oauth.js';
 import { modelPrefersResponsesApi } from '../provider-factory.js';
 import { deriveBrand } from '../models.js';
 import { resolveContextWindow } from '../context-window.js';
@@ -130,7 +130,11 @@ async function refreshClaudeCodeOAuthModels(
 async function refreshAntigravityOAuthModels(
   accessToken: string,
 ): Promise<{ models: CachedModel[]; source: 'live' }> {
-  // Try each base URL in order — first success wins.
+  const merged = new Map<string, CachedModel>();
+
+  // Fetch from each endpoint — daily-cloudcode-pa provides preview models (e.g. Gemini 4 Argon),
+  // while cloudcode-pa provides standard endpoint models (e.g. Gemini 3.1 Pro, 3.6/3.7 Flash).
+  // Merge all discovered models by ID so the user gets the complete catalog.
   for (const base of ANTIGRAVITY_BASE_URLS) {
     try {
       const controller = new AbortController();
@@ -140,7 +144,7 @@ async function refreshAntigravityOAuthModels(
         headers: {
           Accept: 'application/json',
           Authorization: `Bearer ${accessToken}`,
-          'User-Agent': 'vscode/1.X.X (Antigravity/4.2.0)',
+          'User-Agent': ANTIGRAVITY_USER_AGENT,
           'Content-Type': 'application/json',
         },
         signal: controller.signal,
@@ -173,33 +177,38 @@ async function refreshAntigravityOAuthModels(
         : Array.isArray(body.models)
           ? (body.models as Array<Record<string, unknown>>).filter((m): m is Record<string, unknown> & { id: string } => typeof m.id === 'string' && m.id.length > 0)
           : [];
-      if (raw.length === 0) continue;
 
-      const models: CachedModel[] = raw
-        .filter(m => typeof m.id === 'string' && m.id.length > 0 && !isAntigravityCloudCodeHelperSlot(m.id))
-        .map(m => {
-          const id = m.id;
-          const name = (m.displayName ?? m.name ?? id) as string;
-          const isGemini = id.startsWith('gemini');
-          const isClaude = id.startsWith('claude');
-          const isOpenAi = id.startsWith('gpt') || id.startsWith('o');
-          const maxTokens = typeof m.maxTokens === 'number' ? m.maxTokens : undefined;
-          return {
+      for (const m of raw) {
+        if (typeof m.id !== 'string' || m.id.length === 0 || isAntigravityCloudCodeHelperSlot(m.id)) continue;
+        const id = m.id;
+        const name = (m.displayName ?? m.name ?? id) as string;
+        const isGemini = id.startsWith('gemini');
+        const isClaude = id.startsWith('claude');
+        const isOpenAi = id.startsWith('gpt') || id.startsWith('o');
+        const maxTokens = typeof m.maxTokens === 'number' ? m.maxTokens : undefined;
+        const isReasoning = m.supportsThinking === true || id.includes('thinking') || id.includes('pro') || id.includes('argon');
+
+        const existing = merged.get(id);
+        if (!existing || (!existing.reasoning && isReasoning) || (name !== id && existing.name === id)) {
+          merged.set(id, {
             id,
             name,
             upstreamModelId: resolveUpstreamModelId(id),
             family: isGemini ? 'gemini' : id.split('-')[0] ?? id,
             brand: isGemini ? 'Google' : isClaude ? 'Anthropic' : isOpenAi ? 'OpenAI' : 'Other',
-            contextWindow: maxTokens ?? resolveContextWindow(id),
+            contextWindow: maxTokens ?? existing?.contextWindow ?? resolveContextWindow(id),
             modelFormat: 'cloud-code' as const,
-            reasoning: m.supportsThinking === true || id.includes('thinking') || id.includes('pro'),
-          };
-        });
-
-      if (models.length > 0) return { models, source: 'live' };
+            reasoning: isReasoning,
+          });
+        }
+      }
     } catch {
       // try next base URL
     }
+  }
+
+  if (merged.size > 0) {
+    return { models: Array.from(merged.values()), source: 'live' };
   }
 
   throw new Error('Antigravity live model refresh failed — Cloud Code returned no usable models');

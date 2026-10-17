@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { anthropicToCloudCode } from '../src/antigravity/anthropic-to-cloudcode.js';
 import { collectCloudCodeToAnthropic } from '../src/antigravity/cloudcode-to-anthropic.js';
+import { ANTIGRAVITY_USER_AGENT } from '../src/oauth/antigravity-oauth.js';
 
 describe('anthropicToCloudCode', () => {
   it('accepts inherited tool history without replacing genuine Gemini signatures', () => {
@@ -46,7 +47,7 @@ describe('anthropicToCloudCode', () => {
       messages: [{ role: 'user', content: 'hello' }],
     }, 'gemini-3-pro', 'project-id');
 
-    expect(envelope.userAgent).toBe('vscode/1.X.X (Antigravity/4.2.0)');
+    expect(envelope.userAgent).toBe(ANTIGRAVITY_USER_AGENT);
     expect(envelope.requestType).toBe('agent');
     expect(envelope.enabledCreditTypes).toEqual(['GOOGLE_ONE_AI']);
     expect(envelope.project).toBe('project-id');

@@ -5,6 +5,7 @@ import {
 } from "./chunk-3R25QO5X.js";
 import {
   ANTIGRAVITY_BASE_URLS,
+  ANTIGRAVITY_USER_AGENT,
   BACKENDS,
   CLAUDE_CODE_CLI_VERSION,
   CLINE_PASS_CATALOG_URL,
@@ -126,7 +127,7 @@ import {
   upstreamHttpStatus,
   validateCustomEndpointUrl,
   writeSecureLogLine
-} from "./chunk-K5UGOJPF.js";
+} from "./chunk-AI4WXBVF.js";
 
 // src/registry/google-model-id.ts
 var GOOGLE_MODEL_PREFIX = "models/";
@@ -838,7 +839,6 @@ var DEFAULT_SAFETY_SETTINGS = [
   { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
   { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" }
 ];
-var ANTIGRAVITY_USER_AGENT = "vscode/1.X.X (Antigravity/4.2.0)";
 var MIN_ANTIGRAVITY_OUTPUT_TOKENS = 1024;
 var STRIP_KEYS = /* @__PURE__ */ new Set([
   "$schema",
@@ -1804,7 +1804,7 @@ data: ${JSON.stringify({ type: "error", error: { type: errorType, message } })}
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
-            "User-Agent": "vscode/1.X.X (Antigravity/4.2.0)"
+            "User-Agent": ANTIGRAVITY_USER_AGENT
           },
           body: JSON.stringify(envelope)
         });
@@ -5143,6 +5143,7 @@ async function refreshClaudeCodeOAuthModels(accessToken) {
   return { models, source: "live" };
 }
 async function refreshAntigravityOAuthModels(accessToken) {
+  const merged = /* @__PURE__ */ new Map();
   for (const base of ANTIGRAVITY_BASE_URLS) {
     try {
       const controller = new AbortController();
@@ -5152,7 +5153,7 @@ async function refreshAntigravityOAuthModels(accessToken) {
         headers: {
           Accept: "application/json",
           Authorization: `Bearer ${accessToken}`,
-          "User-Agent": "vscode/1.X.X (Antigravity/4.2.0)",
+          "User-Agent": ANTIGRAVITY_USER_AGENT,
           "Content-Type": "application/json"
         },
         signal: controller.signal
@@ -5174,28 +5175,34 @@ async function refreshAntigravityOAuthModels(accessToken) {
         return current;
       };
       const raw = body.models && typeof body.models === "object" && !Array.isArray(body.models) ? Object.entries(body.models).map(([id, model]) => ({ id, ...model })) : Array.isArray(body.models) ? body.models.filter((m) => typeof m.id === "string" && m.id.length > 0) : [];
-      if (raw.length === 0) continue;
-      const models = raw.filter((m) => typeof m.id === "string" && m.id.length > 0 && !isAntigravityCloudCodeHelperSlot(m.id)).map((m) => {
+      for (const m of raw) {
+        if (typeof m.id !== "string" || m.id.length === 0 || isAntigravityCloudCodeHelperSlot(m.id)) continue;
         const id = m.id;
         const name = m.displayName ?? m.name ?? id;
         const isGemini = id.startsWith("gemini");
         const isClaude = id.startsWith("claude");
         const isOpenAi = id.startsWith("gpt") || id.startsWith("o");
         const maxTokens = typeof m.maxTokens === "number" ? m.maxTokens : void 0;
-        return {
-          id,
-          name,
-          upstreamModelId: resolveUpstreamModelId(id),
-          family: isGemini ? "gemini" : id.split("-")[0] ?? id,
-          brand: isGemini ? "Google" : isClaude ? "Anthropic" : isOpenAi ? "OpenAI" : "Other",
-          contextWindow: maxTokens ?? resolveContextWindow(id),
-          modelFormat: "cloud-code",
-          reasoning: m.supportsThinking === true || id.includes("thinking") || id.includes("pro")
-        };
-      });
-      if (models.length > 0) return { models, source: "live" };
+        const isReasoning = m.supportsThinking === true || id.includes("thinking") || id.includes("pro") || id.includes("argon");
+        const existing = merged.get(id);
+        if (!existing || !existing.reasoning && isReasoning || name !== id && existing.name === id) {
+          merged.set(id, {
+            id,
+            name,
+            upstreamModelId: resolveUpstreamModelId(id),
+            family: isGemini ? "gemini" : id.split("-")[0] ?? id,
+            brand: isGemini ? "Google" : isClaude ? "Anthropic" : isOpenAi ? "OpenAI" : "Other",
+            contextWindow: maxTokens ?? existing?.contextWindow ?? resolveContextWindow(id),
+            modelFormat: "cloud-code",
+            reasoning: isReasoning
+          });
+        }
+      }
     } catch {
     }
+  }
+  if (merged.size > 0) {
+    return { models: Array.from(merged.values()), source: "live" };
   }
   throw new Error("Antigravity live model refresh failed \u2014 Cloud Code returned no usable models");
 }
@@ -8781,4 +8788,4 @@ export {
   supportsClaudeTransparentMode,
   buildHttpProxyRoutes
 };
-//# sourceMappingURL=chunk-YTQC5BT3.js.map
+//# sourceMappingURL=chunk-NLTXYC3J.js.map

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.15.16] - 2026-10-17
+
+### Added
+
+- **Full support for Google Gemini 4 Argon preview models.** `gemini-4-argon-low`, `gemini-4-argon-medium`, and `gemini-4-argon-high` are now fully supported across Relay's Cloud Code Assist gateway, CLI proxy, and Antigravity launchers with full `thinkingLevel` reasoning controls.
+- **Unified model catalog discovery across Cloud Code endpoints.** Antigravity OAuth model refresh now queries and merges available models across both `daily-cloudcode-pa.googleapis.com` (for preview models) and `cloudcode-pa.googleapis.com` (for standard models), preventing missing preview model entries.
+
+### Fixed
+
+- **Cloud Code Assist client header identification.** Updated `ANTIGRAVITY_USER_AGENT` to include the `aidev_client` identifier and modern changelist (`cl=997489728`). This fixes Google Cloud Code Assist filtering out Gemini 4 Argon preview models during model discovery and returning HTTP 404 on `streamGenerateContent`.
+
 ## [0.15.15] - 2026-10-14
 
 ### Added

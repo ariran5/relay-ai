@@ -973,12 +973,17 @@ function isGeminiReasoningModel(modelId: string): boolean {
   const lower = modelId.toLowerCase();
   return lower.startsWith('gemini-2.5-')
     || lower.startsWith('gemini-3')
-    || lower.startsWith('gemini-3.');
+    || lower.startsWith('gemini-3.')
+    || lower.startsWith('gemini-4')
+    || lower.startsWith('gemini-4.');
 }
 
 function isGemini3Model(modelId: string): boolean {
   const lower = modelId.toLowerCase();
-  return lower.startsWith('gemini-3') || lower.startsWith('gemini-3.');
+  return lower.startsWith('gemini-3')
+    || lower.startsWith('gemini-3.')
+    || lower.startsWith('gemini-4')
+    || lower.startsWith('gemini-4.');
 }
 
 function isMistralReasoningModel(modelId: string): boolean {

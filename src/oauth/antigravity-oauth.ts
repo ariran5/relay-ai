@@ -33,9 +33,12 @@ const SCOPES = [
   'https://www.googleapis.com/auth/experimentsandconfigs',
 ].join(' ');
 
-// Pinned to Antigravity-Manager version used for header fingerprinting.
-const ANTIGRAVITY_VERSION = '4.2.0';
-export const ANTIGRAVITY_USER_AGENT = `vscode/1.X.X (Antigravity/${ANTIGRAVITY_VERSION})`;
+// User-Agent fingerprint matching Antigravity language server v2.22.0+.
+// Google Cloud Code Assist gates new models (e.g. Gemini 4 Argon) on the
+// 'aidev_client' marker and changelist (cl) >= 997489728.
+const osType = process.platform === 'darwin' ? 'darwin' : process.platform === 'win32' ? 'windows' : 'linux';
+const archType = process.arch === 'arm64' ? 'arm64' : 'x64';
+export const ANTIGRAVITY_USER_AGENT = `antigravity/2.22.0 (aidev_client; os_type=${osType}; arch=${archType}; cl=997489728; auth_method=oauth)`;
 const ANTIGRAVITY_METADATA = { ideType: 'ANTIGRAVITY' };
 
 // Cloud Code Assist base URLs — tried in order, first success wins.

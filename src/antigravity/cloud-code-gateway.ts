@@ -20,7 +20,7 @@ import {
 } from './request-adapter.js';
 import { formatCloudCodeChunk, mapFinishReason, normalizeFunctionCallArgs } from './response-adapter.js';
 import { applyClaudeCodeOAuthIdentity } from '../oauth/claude-code-identity.js';
-import { ANTIGRAVITY_BASE_URLS } from '../oauth/antigravity-oauth.js';
+import { ANTIGRAVITY_BASE_URLS, ANTIGRAVITY_USER_AGENT } from '../oauth/antigravity-oauth.js';
 import type { AntigravityRoute, CatalogFixture } from './types.js';
 import {
   injectRelayModels,
@@ -575,7 +575,7 @@ async function handleCloudCodeForwardRequest(
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${route.apiKey}`,
-      'User-Agent': 'vscode/1.X.X (Antigravity/4.2.0)',
+      'User-Agent': ANTIGRAVITY_USER_AGENT,
     },
     body: JSON.stringify(upstreamBody),
   });
