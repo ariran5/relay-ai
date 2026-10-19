@@ -11,7 +11,7 @@ import {
 } from '../src/codex/app-config.js';
 import { restoreCodexAppOverlay } from '../src/codex/app-session.js';
 import { getBackupsDir } from '../src/codex/session.js';
-import { CODEX_APP_PROVIDER_ID, CODEX_APP_AUTO_COMPACT_RATIO } from '../src/codex/app-profile.js';
+import { CODEX_APP_PROVIDER_ID, CODEX_APP_AUTO_COMPACT_RATIO, CODEX_APP_THREAD_UNLOAD_DELAY_SECS } from '../src/codex/app-profile.js';
 import type { CodexAppConfigSpec } from '../src/codex/app-profile.js';
 
 describe('app-config', () => {
@@ -103,6 +103,41 @@ describe('app-config', () => {
     const text = readFileSync(configPath, 'utf8');
     expect(text).toContain('model_context_window = 200000');
     expect(text).toContain(`model_auto_compact_token_limit = ${Math.floor(200_000 * CODEX_APP_AUTO_COMPACT_RATIO)}`);
+  });
+
+  it('raises thread_unload_delay_secs so idle threads are not unloaded under the app', () => {
+    const configPath = join(home, '.codex', 'config.toml');
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    applyAppConfigPatch(proxySpec('/tmp/catalog.json'), configPath);
+    expect(readFileSync(configPath, 'utf8')).toContain(`thread_unload_delay_secs = ${CODEX_APP_THREAD_UNLOAD_DELAY_SECS}`);
+  });
+
+  it('keeps a longer user-set thread_unload_delay_secs', () => {
+    const configPath = join(home, '.codex', 'config.toml');
+    mkdirSync(join(home, '.codex'), { recursive: true });
+    const longer = CODEX_APP_THREAD_UNLOAD_DELAY_SECS * 2;
+    writeFileSync(configPath, `thread_unload_delay_secs = ${longer}\n`, 'utf8');
+    applyAppConfigPatch(proxySpec('/tmp/catalog.json'), configPath);
+    expect(readFileSync(configPath, 'utf8')).toContain(`thread_unload_delay_secs = ${longer}`);
+  });
+
+  it('restore puts back the original thread_unload_delay_secs, or removes it', () => {
+    const configPath = join(home, '.codex', 'config.toml');
+    mkdirSync(join(home, '.codex'), { recursive: true });
+
+    const withValue = 'model = "gpt-5"\nthread_unload_delay_secs = 600\n';
+    writeFileSync(configPath, withValue, 'utf8');
+    const state = captureRestoreState(withValue);
+    applyAppConfigPatch(proxySpec('/tmp/catalog.json'), configPath);
+    restoreConfigFromState(state, configPath);
+    expect(readFileSync(configPath, 'utf8')).toContain('thread_unload_delay_secs = 600');
+
+    const without = 'model = "gpt-5"\n';
+    writeFileSync(configPath, without, 'utf8');
+    const state2 = captureRestoreState(without);
+    applyAppConfigPatch(proxySpec('/tmp/catalog.json'), configPath);
+    restoreConfigFromState(state2, configPath);
+    expect(readFileSync(configPath, 'utf8')).not.toContain('thread_unload_delay_secs');
   });
 
   it('restore state round-trips model_reasoning_effort', () => {

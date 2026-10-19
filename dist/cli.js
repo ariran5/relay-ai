@@ -2,7 +2,7 @@
 import {
   addManualModel,
   removeManualModel
-} from "./chunk-WNADO255.js";
+} from "./chunk-OCKOGDSZ.js";
 import {
   CODEX_APP_AUTO_COMPACT_RATIO,
   CODEX_APP_PROVIDER_ID,
@@ -130,7 +130,7 @@ import {
   upstreamModelId,
   waitForCodexAppQuit,
   zenRegistryStub
-} from "./chunk-NLTXYC3J.js";
+} from "./chunk-NPKFQM4N.js";
 import {
   filterTemplates,
   getTemplateById,
@@ -229,7 +229,7 @@ import {
   upstreamHttpStatus,
   validateCustomEndpointUrl,
   writeSecureLogLine
-} from "./chunk-AI4WXBVF.js";
+} from "./chunk-5N5YX2JF.js";
 import "./chunk-JIDIH7DS.js";
 
 // src/cli.ts
@@ -12478,6 +12478,7 @@ function captureRestoreState(text6) {
   const reasoning = rootString(config, "model_reasoning_effort");
   const contextWindow = rootNumber(config, "model_context_window");
   const autoCompact = rootNumber(config, "model_auto_compact_token_limit");
+  const unloadDelay = rootNumber(config, "thread_unload_delay_secs");
   const features = asRecord(config.features);
   const multiAgentV2 = "multi_agent_v2" in features;
   return {
@@ -12497,6 +12498,8 @@ function captureRestoreState(text6) {
     modelContextWindow: contextWindow.value,
     hadModelAutoCompactTokenLimit: autoCompact.had,
     modelAutoCompactTokenLimit: autoCompact.value,
+    hadThreadUnloadDelaySecs: unloadDelay.had,
+    threadUnloadDelaySecs: unloadDelay.value,
     hadMultiAgentV2: multiAgentV2,
     multiAgentV2: features.multi_agent_v2
   };
@@ -12526,6 +12529,10 @@ function mergeAppConfig(existing, spec) {
     out.model_auto_compact_token_limit = patch.model_auto_compact_token_limit;
   } else {
     delete out.model_auto_compact_token_limit;
+  }
+  const existingDelay = out.thread_unload_delay_secs;
+  if (typeof existingDelay !== "number" || existingDelay < patch.thread_unload_delay_secs) {
+    out.thread_unload_delay_secs = patch.thread_unload_delay_secs;
   }
   const features = asRecord(out.features);
   if (spec.multiAgentV2Enabled) {
@@ -12659,6 +12666,7 @@ function restoreConfigFromState(state, configPath = getCodexConfigPath()) {
   applyRestoreKey(config, "model_reasoning_effort", state.hadModelReasoningEffort, state.modelReasoningEffort);
   applyRestoreNumber(config, "model_context_window", state.hadModelContextWindow ?? false, state.modelContextWindow);
   applyRestoreNumber(config, "model_auto_compact_token_limit", state.hadModelAutoCompactTokenLimit ?? false, state.modelAutoCompactTokenLimit);
+  applyRestoreNumber(config, "thread_unload_delay_secs", state.hadThreadUnloadDelaySecs ?? false, state.threadUnloadDelaySecs);
   const sidecar = getCodexAppSidecarProfilePath();
   if (existsSync10(sidecar)) {
     try {
@@ -17241,7 +17249,7 @@ Options:
   --trace    Write debug logs under ~/.relay-ai/logs/`);
       return 0;
     }
-    const { runUiCommand } = await import("./ui-command-7IVQUBYD.js");
+    const { runUiCommand } = await import("./ui-command-VBM345J7.js");
     return runUiCommand({ trace: parsed.trace, serverMode: parsed.uiServerMode });
   }
   if (parsed.command === "models") {

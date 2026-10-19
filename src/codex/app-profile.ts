@@ -24,6 +24,17 @@ export const PREVIEW_PROXY_PORT = 54321;
  */
 export const CODEX_APP_AUTO_COMPACT_RATIO = 0.9;
 
+/**
+ * How long Codex app-server keeps a thread loaded after its last subscriber
+ * leaves (`thread_unload_delay_secs`, Codex default 1800 = 30 min). The ChatGPT
+ * desktop app unsubscribes from a conversation when you switch away from it,
+ * but keeps believing it is still loaded. Once app-server unloads it, the next
+ * message fails with "thread not found: <id>" until the app is restarted.
+ * 48 hours covers a conversation left overnight plus a workday. Users can set
+ * a longer `thread_unload_delay_secs` in config.toml; shorter values are raised.
+ */
+export const CODEX_APP_THREAD_UNLOAD_DELAY_SECS = 48 * 60 * 60;
+
 export function codexAppModelSlug(rawModelId: string): string {
   return rawModelId.startsWith('models/') ? rawModelId.slice('models/'.length) : rawModelId;
 }
@@ -49,6 +60,7 @@ export function buildCodexAppRootConfig(spec: CodexAppConfigSpec): {
   model_catalog_json: string;
   model_context_window?: number;
   model_auto_compact_token_limit?: number;
+  thread_unload_delay_secs: number;
   features?: Record<string, unknown>;
 } {
   const ctxWindow = spec.route.contextWindow;
@@ -57,6 +69,7 @@ export function buildCodexAppRootConfig(spec: CodexAppConfigSpec): {
     model_provider: 'openai',
     openai_base_url: spec.proxyBaseUrl ?? `http://127.0.0.1:${spec.proxyPort}/v1`,
     model_catalog_json: spec.catalogPath,
+    thread_unload_delay_secs: CODEX_APP_THREAD_UNLOAD_DELAY_SECS,
     ...(spec.multiAgentV2Enabled ? {
       features: { multi_agent_v2: CODEX_MULTI_AGENT_V2 },
     } : {}),

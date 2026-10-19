@@ -212,9 +212,26 @@ openai_base_url = "http://127.0.0.1:<random-port>/v1"
 model_catalog_json = "/Users/you/.relay-ai/codex/app-models-anthropic.json"
 model_context_window = 1000000
 model_auto_compact_token_limit = 700000
+thread_unload_delay_secs = 172800
 ```
 
 `model_context_window` tells Codex the model's actual context limit. `model_auto_compact_token_limit` (set to 70% of the limit) tells Codex when to trigger auto-compaction, leaving enough headroom for the compaction request itself to succeed. Both fields are removed on restore.
+
+#### Idle conversations and `thread_unload_delay_secs`
+
+`thread_unload_delay_secs` (48 hours, `172800`) controls how long Codex keeps a conversation loaded after you switch away from it. Codex's default is 30 minutes. Once it unloads the conversation, the ChatGPT app still treats it as loaded, and your next message fails with `Error submitting message — thread not found: <id>` until the app is restarted. Your conversation is not lost; it is still saved on disk.
+
+**To change it:** set your own value in `~/.codex/config.toml` before running `relay-ai codex-app`:
+
+```toml
+thread_unload_delay_secs = 604800   # 7 days
+```
+
+- A value **above 48 hours** is kept as-is.
+- A value **below 48 hours** is raised to 48 hours for the session (a short value would bring the error back).
+- At the end of the session (Ctrl+C or `--restore`) your original value is put back, or the key is removed if you had none.
+
+Cost of a longer delay: each conversation you open stays loaded until the app quits, using roughly 15–30 MB. Quitting the app clears everything regardless of the delay.
 
 The app deliberately keeps `model_provider = "openai"` and redirects the built-in provider with `openai_base_url`. Codex records the provider on every local thread and filters its history by provider; using a separate custom provider would hide existing OpenAI/ChatGPT threads while a relay-ai session is active. No conversations are deleted.
 

@@ -127,7 +127,7 @@ import {
   upstreamHttpStatus,
   validateCustomEndpointUrl,
   writeSecureLogLine
-} from "./chunk-AI4WXBVF.js";
+} from "./chunk-5N5YX2JF.js";
 
 // src/registry/google-model-id.ts
 var GOOGLE_MODEL_PREFIX = "models/";
@@ -187,6 +187,7 @@ function supportsMultiAgentV2(binaryPath, run3 = (path, args, env) => runCodexCo
 var CODEX_APP_PROVIDER_ID = "relay-ai-launch-codex-app";
 var PREVIEW_PROXY_PORT = 54321;
 var CODEX_APP_AUTO_COMPACT_RATIO = 0.9;
+var CODEX_APP_THREAD_UNLOAD_DELAY_SECS = 48 * 60 * 60;
 function codexAppModelSlug(rawModelId) {
   return rawModelId.startsWith("models/") ? rawModelId.slice("models/".length) : rawModelId;
 }
@@ -201,6 +202,7 @@ function buildCodexAppRootConfig(spec) {
     model_provider: "openai",
     openai_base_url: spec.proxyBaseUrl ?? `http://127.0.0.1:${spec.proxyPort}/v1`,
     model_catalog_json: spec.catalogPath,
+    thread_unload_delay_secs: CODEX_APP_THREAD_UNLOAD_DELAY_SECS,
     ...spec.multiAgentV2Enabled ? {
       features: { multi_agent_v2: CODEX_MULTI_AGENT_V2 }
     } : {},
@@ -8788,4 +8790,4 @@ export {
   supportsClaudeTransparentMode,
   buildHttpProxyRoutes
 };
-//# sourceMappingURL=chunk-NLTXYC3J.js.map
+//# sourceMappingURL=chunk-NPKFQM4N.js.map

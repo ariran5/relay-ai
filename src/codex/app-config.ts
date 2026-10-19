@@ -38,6 +38,9 @@ export interface CodexAppRestoreState {
   modelContextWindow?: number;
   hadModelAutoCompactTokenLimit?: boolean;
   modelAutoCompactTokenLimit?: number;
+  /** Optional for restore files written before the thread-unload fix. */
+  hadThreadUnloadDelaySecs?: boolean;
+  threadUnloadDelaySecs?: number;
   /** Optional for restore files written before mixed-mode v2 support. */
   hadMultiAgentV2?: boolean;
   multiAgentV2?: unknown;
@@ -94,6 +97,7 @@ export function captureRestoreState(text: string): CodexAppRestoreState {
   const reasoning = rootString(config, 'model_reasoning_effort');
   const contextWindow = rootNumber(config, 'model_context_window');
   const autoCompact = rootNumber(config, 'model_auto_compact_token_limit');
+  const unloadDelay = rootNumber(config, 'thread_unload_delay_secs');
   const features = asRecord(config.features);
   const multiAgentV2 = 'multi_agent_v2' in features;
   return {
@@ -113,6 +117,8 @@ export function captureRestoreState(text: string): CodexAppRestoreState {
     modelContextWindow: contextWindow.value,
     hadModelAutoCompactTokenLimit: autoCompact.had,
     modelAutoCompactTokenLimit: autoCompact.value,
+    hadThreadUnloadDelaySecs: unloadDelay.had,
+    threadUnloadDelaySecs: unloadDelay.value,
     hadMultiAgentV2: multiAgentV2,
     multiAgentV2: features.multi_agent_v2,
   };
@@ -147,6 +153,11 @@ function mergeAppConfig(existing: TomlRecord, spec: CodexAppConfigSpec): TomlRec
     out.model_auto_compact_token_limit = patch.model_auto_compact_token_limit;
   } else {
     delete out.model_auto_compact_token_limit;
+  }
+  // Keep a longer delay the user set themselves; otherwise raise it.
+  const existingDelay = out.thread_unload_delay_secs;
+  if (typeof existingDelay !== 'number' || existingDelay < patch.thread_unload_delay_secs) {
+    out.thread_unload_delay_secs = patch.thread_unload_delay_secs;
   }
   const features = asRecord(out.features);
   if (spec.multiAgentV2Enabled) {
@@ -292,6 +303,7 @@ export function restoreConfigFromState(state: CodexAppRestoreState, configPath =
   applyRestoreKey(config, 'model_reasoning_effort', state.hadModelReasoningEffort, state.modelReasoningEffort);
   applyRestoreNumber(config, 'model_context_window', state.hadModelContextWindow ?? false, state.modelContextWindow);
   applyRestoreNumber(config, 'model_auto_compact_token_limit', state.hadModelAutoCompactTokenLimit ?? false, state.modelAutoCompactTokenLimit);
+  applyRestoreNumber(config, 'thread_unload_delay_secs', state.hadThreadUnloadDelaySecs ?? false, state.threadUnloadDelaySecs);
 
   const sidecar = getCodexAppSidecarProfilePath();
   if (existsSync(sidecar)) {

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.15.17] - 2026-10-19
+
+### Fixed
+
+- **Codex/ChatGPT desktop app: "Error submitting message — thread not found" after a conversation sat idle.** The app unsubscribes from a conversation when you switch away but keeps treating it as loaded, while Codex's backend unloads it after 30 minutes; the next message then failed until the app was restarted. `relay-ai codex-app` now sets `thread_unload_delay_secs` to 48 hours in `~/.codex/config.toml` for the session. A longer value you set yourself is kept, a shorter one is raised to 48 hours, and your original value (or its absence) is restored on exit and by `--restore`. See `docs/CODEX.md` for how to raise it.
+
 ## [0.15.16] - 2026-10-17
 
 ### Added
