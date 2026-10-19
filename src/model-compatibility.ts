@@ -47,10 +47,14 @@ export function isAntigravityCloudCodeHelperSlot(modelId: string): boolean {
  * `403 FreeTierError: "OpenCode's free tier can only be used from within
  * OpenCode"` (maintainer statement, 2026-09-18:
  * https://github.com/anomalyco/opencode/issues/49621#issuecomment-5723383322).
- * Hidden rather than blacklisted per id because the free lineup rotates; the
- * ids surface through both the Zen and Go providers.
+ * Hidden rather than blacklisted per id because the free lineup rotates.
+ *
+ * Zen only. OpenCode Go serves the same `*-free` ids to third-party clients
+ * (verified live 2026-10-19: Go free models return 200 with an
+ * `x-opencode-session` header, which Relay sends; the same ids on Zen return
+ * the 403). Hiding them on Go removed working free models from every picker.
  */
-const ZEN_FREE_TIER_PROVIDERS = new Set(['zen', 'go']);
+const ZEN_FREE_TIER_PROVIDERS = new Set(['zen']);
 
 export function isZenFreeTierModel(providerId: string, modelId: string): boolean {
   if (!ZEN_FREE_TIER_PROVIDERS.has(providerId)) return false;

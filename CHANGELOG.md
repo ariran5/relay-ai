@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **OpenCode Go free models were wrongly hidden.** The Zen free-tier rule (`*-free`, `big-pickle` blocked outside the OpenCode client) was also applied to the Go provider, removing working models such as `minimax-m3.1-flash-free`, `longcat-2.5-preview-free` and `beam-free` from every picker. Verified live: Go returns 200 for these (Relay already sends the required `x-opencode-session` header), while the same ids on Zen return the 403. The rule now applies to Zen only. Docs corrected.
 - **Codex/ChatGPT desktop app: "Error submitting message — thread not found" after a conversation sat idle.** The app unsubscribes from a conversation when you switch away but keeps treating it as loaded, while Codex's backend unloads it after 30 minutes; the next message then failed until the app was restarted. `relay-ai codex-app` now sets `thread_unload_delay_secs` to 48 hours in `~/.codex/config.toml` for the session. A longer value you set yourself is kept, a shorter one is raised to 48 hours, and your original value (or its absence) is restored on exit and by `--restore`. See `docs/CODEX.md` for how to raise it.
 
 ## [0.15.16] - 2026-10-17

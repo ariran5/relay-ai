@@ -60,7 +60,7 @@ You may also have a real Anthropic API key in your shell (`~/.zshrc`, etc.). Tha
 
 ## OpenCode Zen: `403 OpenCode's free tier can only be used from within OpenCode`
 
-Free-tier models on OpenCode Zen (e.g. `big-pickle`, `mimo-v2.6-flash-free`, `muse-spark-1.3-contributor-free`, or any other `*-free` model) cannot be called from third-party tools, and Relay hides them from every model list. On an older Relay build that still lists one, selecting it returns:
+Free-tier models on OpenCode Zen (e.g. `big-pickle`, `mimo-v2.6-flash-free`, `muse-spark-1.3-contributor-free`, or any other `*-free` model) cannot be called from third-party tools, and Relay hides them from the Zen model list. OpenCode Go's free models (e.g. `minimax-m3.1-flash-free`) are not affected and work normally. On an older Relay build that still lists one, selecting it returns:
 
 ```text
 API Error: 403 OpenCode's free tier can only be used from within OpenCode
@@ -74,8 +74,8 @@ In mid-September 2026, OpenCode updated their Zen API gateway to block third-par
 
 ### Solutions
 
-1. **Update Relay**: current builds hide these ids from every picker and catalog (Zen and Go alike), so they cannot be selected in the first place.
-2. **Use OpenCode Go**: OpenCode's $10/month Go subscription (`--provider go`) is fully supported and continues to work with external agents and Relay AI as normal.
+1. **Update Relay**: current builds hide these ids from the Zen picker and catalog, so they cannot be selected in the first place.
+2. **Use OpenCode Go**: OpenCode's $10/month Go subscription (`--provider go`) is fully supported and continues to work with external agents and Relay AI as normal, including its `*-free` models.
 3. **Use paid OpenCode Zen models**: Metered/pay-as-you-go Zen models with active credits or billing are unaffected by this restriction and work normally.
 4. **Use direct registry providers**: Instead of routing free models through Zen, add API keys directly for providers like Groq, Google AI Studio, DeepSeek, or Cerebras (`relay-ai providers add`).
 

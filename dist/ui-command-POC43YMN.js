@@ -37,7 +37,7 @@ import {
   summarizeServerProviders,
   supportsClaudeTransparentMode,
   updateCustomEndpointProvider
-} from "./chunk-NPKFQM4N.js";
+} from "./chunk-VNRNMO5R.js";
 import {
   init_provider_templates,
   listAddableTemplates,
@@ -1897,4 +1897,4 @@ export {
   resolveUiShutdownDecision,
   runUiCommand
 };
-//# sourceMappingURL=ui-command-VBM345J7.js.map
+//# sourceMappingURL=ui-command-POC43YMN.js.map

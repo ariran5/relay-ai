@@ -288,13 +288,17 @@ describe('isRoutableModel', () => {
 });
 
 describe('OpenCode Zen free tier', () => {
-  it('hides *-free ids and big-pickle on the zen and go providers', () => {
-    for (const providerId of ['zen', 'go']) {
-      for (const modelId of ['big-pickle', 'space-bunny-free', 'deepseek-v4-flash-free', 'ox-alpha-free']) {
-        expect(shouldHideModel({ providerId, modelId, agent: 'codex-app' }), `${providerId} ${modelId}`).toBe(true);
-      }
+  it('hides *-free ids and big-pickle on the zen provider', () => {
+    for (const modelId of ['big-pickle', 'space-bunny-free', 'deepseek-v4-flash-free', 'ox-alpha-free', 'minimax-m3.1-flash-free']) {
+      expect(shouldHideModel({ providerId: 'zen', modelId, agent: 'codex-app' }), `zen ${modelId}`).toBe(true);
     }
     expect(hideReason({ providerId: 'zen', modelId: 'big-pickle', agent: 'claude' })).toContain('zen-free-tier');
+  });
+
+  it('keeps *-free ids visible on OpenCode Go, which serves them to third-party clients', () => {
+    for (const modelId of ['minimax-m3.1-flash-free', 'longcat-2.5-preview-free', 'beam-free', 'big-pickle']) {
+      expect(shouldHideModel({ providerId: 'go', modelId, agent: 'codex-app' }), `go ${modelId}`).toBe(false);
+    }
   });
 
   it('keeps paid zen/go models and other-provider free ids visible', () => {

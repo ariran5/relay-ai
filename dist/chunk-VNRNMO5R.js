@@ -2360,7 +2360,7 @@ var ANTIGRAVITY_HELPER_SLOT = /^(tab_|chat_|models\/)|image/i;
 function isAntigravityCloudCodeHelperSlot(modelId) {
   return ANTIGRAVITY_HELPER_SLOT.test(modelId);
 }
-var ZEN_FREE_TIER_PROVIDERS = /* @__PURE__ */ new Set(["zen", "go"]);
+var ZEN_FREE_TIER_PROVIDERS = /* @__PURE__ */ new Set(["zen"]);
 function isZenFreeTierModel(providerId, modelId) {
   if (!ZEN_FREE_TIER_PROVIDERS.has(providerId)) return false;
   const id = modelId.trim().toLowerCase();
@@ -8790,4 +8790,4 @@ export {
   supportsClaudeTransparentMode,
   buildHttpProxyRoutes
 };
-//# sourceMappingURL=chunk-NPKFQM4N.js.map
+//# sourceMappingURL=chunk-VNRNMO5R.js.map
